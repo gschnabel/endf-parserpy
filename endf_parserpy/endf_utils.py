@@ -231,7 +231,8 @@ def read_list(lines, ofs=0, with_ctrl=True, callback=None,
     NPL = dic['N1']
     if NPL == 0:
         dic['vals'] = []
-        ofs += 1
+        # JENDL fix
+        # ofs += 1
     else:
         vals, ofs = read_endf_numbers(lines, NPL, ofs,
                                       blank_as_zero=blank_as_zero,
@@ -245,8 +246,10 @@ def write_list(dic, with_ctrl=True, **write_opts):
     tmpdic['N1'] = NPL
     lines = write_cont(dic, with_ctrl, **write_opts)
     if NPL == 0:
-        body_lines = write_endf_numbers([0.0 for i in range(6)],
-                                        **write_opts)
+        # JENDL fix
+        pass
+        # body_lines = write_endf_numbers([0.0 for i in range(6)],
+        #                                 **write_opts)
     else:
         ext_vals = dic['vals'].copy()
         if NPL % 6 != 0:
