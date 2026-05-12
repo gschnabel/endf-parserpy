@@ -12,7 +12,11 @@ from .endf_recipe_mf3 import ENDF_RECIPE_MF3
 from .endf_recipe_mf4 import ENDF_RECIPE_MF4
 from .endf_recipe_mf5 import ENDF_RECIPE_MF5
 from .endf_recipe_mf6 import ENDF_RECIPE_MF6
-from .endf_recipe_mf7 import ENDF_RECIPE_MF7_MT2, ENDF_RECIPE_MF7_MT4, ENDF_RECIPE_MF7_MT451
+from .endf_recipe_mf7 import (
+    ENDF_RECIPE_MF7_MT2,
+    ENDF_RECIPE_MF7_MT4,
+    ENDF_RECIPE_MF7_MT451,
+)
 from .endf_recipe_mf8 import ENDF_RECIPE_MF8
 from .endf_recipe_mf8_mt454 import ENDF_RECIPE_MF8_MT454
 from .endf_recipe_mf8_mt457 import ENDF_RECIPE_MF8_MT457
@@ -27,6 +31,8 @@ from .endf_recipe_mf23 import ENDF_RECIPE_MF23
 from .endf_recipe_mf26 import ENDF_RECIPE_MF26
 from .endf_recipe_mf27 import ENDF_RECIPE_MF27
 from .endf_recipe_mf28 import ENDF_RECIPE_MF28
+from .endf_recipe_mf30_mt1 import ENDF_RECIPE_MF30_MT1
+from .endf_recipe_mf30_mt2 import ENDF_RECIPE_MF30_MT2
 from .endf_recipe_mf31_mt452_455_456 import ENDF_RECIPE_MF31_MT452_455_456
 from .endf_recipe_mf32 import ENDF_RECIPE_MF32
 from .endf_recipe_mf33 import ENDF_RECIPE_MF33
@@ -70,6 +76,8 @@ defdic(endf_recipe_dictionary, (23,), ENDF_RECIPE_MF23)
 defdic(endf_recipe_dictionary, (26,), ENDF_RECIPE_MF26)
 defdic(endf_recipe_dictionary, (27,), ENDF_RECIPE_MF27)
 defdic(endf_recipe_dictionary, (28,), ENDF_RECIPE_MF28)
+defdic(endf_recipe_dictionary, (30, 1), ENDF_RECIPE_MF30_MT1)
+defdic(endf_recipe_dictionary, (30, 2), ENDF_RECIPE_MF30_MT2)
 defdic(endf_recipe_dictionary, (31, 452), ENDF_RECIPE_MF31_MT452_455_456)
 defdic(endf_recipe_dictionary, (31, 455), ENDF_RECIPE_MF31_MT452_455_456)
 defdic(endf_recipe_dictionary, (31, 456), ENDF_RECIPE_MF31_MT452_455_456)
