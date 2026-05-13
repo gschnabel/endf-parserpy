@@ -3,12 +3,13 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/04/12
-# Last modified:   2024/05/07
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2024 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
+from lark.tree import Tree
 from endf_parserpy.utils.tree_utils import get_child
 from .expr_utils.custom_nodes import VariableToken
 from .expr_utils.node_checks import is_variable
@@ -75,6 +76,22 @@ def unregister_abbreviations(vardict):
         del vardict["__abbrevs"]
 
 
+def _mark_all_vars_inconsistent(node):
+    if isinstance(node, VariableToken):
+        if node.inconsistent:
+            return node
+        new_var = VariableToken(
+            node, cpp_namespace=node.cpp_namespace, inconsistent=True
+        )
+        new_var.indices = node.indices
+        return new_var
+    if isinstance(node, Tree):
+        new_node = node.copy()
+        new_node.children = [_mark_all_vars_inconsistent(c) for c in node.children]
+        return new_node
+    return node
+
+
 def expand_abbreviation(node, vardict):
     if not is_variable(node):
         return node
@@ -83,4 +100,12 @@ def expand_abbreviation(node, vardict):
     abbrevs = vardict["__abbrevs"]
     if node not in abbrevs:
         return node
-    return abbrevs[node].children[0]
+    expanded = abbrevs[node].children[0]
+    # Propagate the `?` (inconsistent) marker through the placeholder so the
+    # downstream `contains_potentially_inconsistent_variable` check still sees
+    # it after expansion. Without this, `NX := ...` followed by `NX?` loses
+    # the marker because the substituted expression contains only the inner
+    # variables, none of which carry `inconsistent=True`. (Issue #55)
+    if node.inconsistent:
+        expanded = _mark_all_vars_inconsistent(expanded)
+    return expanded
