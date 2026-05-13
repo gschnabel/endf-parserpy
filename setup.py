@@ -8,7 +8,17 @@ from setuptools.command.build_py import build_py as _build_py
 from pybind11.setup_helpers import (
     Pybind11Extension,
     build_ext as pybind11_build_ext,
+    ParallelCompile,
 )
+
+
+# ParallelCompile patches `CCompiler.compile()` to use a thread pool when
+# given a list of sources. It does NOT parallelize across `Extension`
+# instances (that's setuptools' own `parallel` knob -- enabled below in
+# CustomBuildExt.finalize_options). It does help here for the explicit
+# multi-source `self.compiler.compile([...])` call we use to pre-build
+# the deduplicated shared chunks ahead of the per-extension build.
+ParallelCompile("INSTALL_ENDF_PARSERPY_NUM_BUILD_JOBS", default=0).install()
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -110,31 +120,49 @@ class CustomBuildExt(pybind11_build_ext):
             logger.info(f"Building C++ extensions with parallel={self.parallel}")
 
     def _compile_shared_object_if_present(self):
-        """If a `_shared.cpp` exists in cpp_parsers/, compile it once and
-        attach the resulting .o to each Pybind11Extension via `extra_objects`.
-        The shared object contains the parser/writer function bodies that
-        are byte-identical across flavors. Compiling and linking it from a
-        single TU per build avoids repeating that work for every flavor.
+        """Pre-compile all deduplicated shared TUs (``_shared.cpp`` or
+        ``_shared_part_NN.cpp``) once each, then attach the resulting
+        ``.o`` files to every Pybind11Extension via ``extra_objects``.
 
-        Must be called *after* pybind11's cxx_std auto-detect has run and
-        finalized each extension's ``extra_compile_args`` / ``include_dirs``,
-        otherwise the shared TU is compiled with the wrong flags.
+        With ``ParallelCompile`` installed at module top, the single
+        ``self.compiler.compile([...])`` call below fans out across all
+        cores, so multiple shared chunks compile concurrently. The
+        per-extension parallel build then proceeds afterwards.
+
+        Must be called *after* pybind11's cxx_std auto-detect has run
+        and finalized each extension's ``extra_compile_args`` /
+        ``include_dirs``, otherwise the shared TUs are compiled with the
+        wrong flags.
         """
-        shared_cpp = os.path.join("endf_parserpy", "cpp_parsers", "_shared.cpp")
-        if not os.path.exists(shared_cpp):
+        cpp_parsers_dir = os.path.join("endf_parserpy", "cpp_parsers")
+        shared_sources = []
+        # Both layouts are supported: a single _shared.cpp (legacy) or
+        # _shared_part_NN.cpp chunks emitted by the codegen.
+        for name in sorted(os.listdir(cpp_parsers_dir)):
+            if name == "_shared.cpp" or (
+                name.startswith("_shared_part_") and name.endswith(".cpp")
+            ):
+                shared_sources.append(os.path.join(cpp_parsers_dir, name))
+        if not shared_sources:
             return
-        # Filter `_shared.cpp` out of every extension's source list so the
-        # default build doesn't compile it once per extension.
+        # Filter shared sources out of every extension's source list so
+        # the default per-extension build doesn't compile each chunk
+        # again (and so we don't end up with the same symbols defined in
+        # two object files of the same flavor).
+        shared_basenames = {os.path.basename(s) for s in shared_sources}
         for ext in self.extensions:
             ext.sources = [
-                s for s in ext.sources if os.path.basename(s) != "_shared.cpp"
+                s for s in ext.sources if os.path.basename(s) not in shared_basenames
             ]
         if not self.extensions:
             return
-        logger.info(f"Pre-compiling shared TU {shared_cpp} (single shot)")
+        logger.info(
+            f"Pre-compiling {len(shared_sources)} shared TU(s) "
+            "(ParallelCompile fans out across CPU cores)"
+        )
         sample_ext = self.extensions[0]
         objects = self.compiler.compile(
-            [shared_cpp],
+            shared_sources,
             output_dir=self.build_temp,
             macros=sample_ext.define_macros
             + [(u, None) for u in sample_ext.undef_macros],
@@ -144,12 +172,14 @@ class CustomBuildExt(pybind11_build_ext):
             depends=sample_ext.depends,
         )
         if not objects:
-            raise RuntimeError(f"failed to compile shared TU {shared_cpp}")
-        shared_obj = objects[0]
-        logger.info(f"Shared TU compiled to {shared_obj}; linking into each flavor")
+            raise RuntimeError(f"failed to compile shared TUs: {shared_sources}")
+        logger.info(
+            f"Shared TUs compiled to {len(objects)} object file(s); "
+            "linking into each flavor"
+        )
         for ext in self.extensions:
             existing = list(ext.extra_objects or [])
-            ext.extra_objects = existing + [shared_obj]
+            ext.extra_objects = existing + list(objects)
 
     def build_extensions(self):
         # Re-implement pybind11_build_ext's cxx_std auto-detection so we
@@ -194,14 +224,18 @@ class OptionalBuildExt(CustomBuildExt):
 def generate_ext_module_list(cpp_compilation, optim_level):
     """Generate C++ modules from ENDF recipes and register as extension modules.
 
-    ``_shared.cpp`` is intentionally NOT registered as its own
-    Pybind11Extension. It has no PYBIND11_MODULE block and is meant to be
-    compiled once and linked into each flavor's .so as an extra object;
-    that wiring happens inside :class:`CustomBuildExt.build_extensions`.
+    Shared TUs (``_shared.cpp`` or ``_shared_part_NN.cpp``) are
+    intentionally NOT registered as their own ``Pybind11Extension``.
+    They have no PYBIND11_MODULE block and are meant to be compiled
+    once and linked into each flavor's ``.so`` as extra objects; that
+    wiring happens inside :class:`CustomBuildExt.build_extensions`.
     """
     # package functionality is already needed during building the package
     add_project_dir_to_syspath()
-    from endf_parserpy.compiler.compiler import _prepare_cpp_parsers_subpackage
+    from endf_parserpy.compiler.compiler import (
+        _prepare_cpp_parsers_subpackage,
+        is_shared_chunk_filename,
+    )
 
     if cpp_compilation == "no":
         logger.info("Disabling C++ ENDF-6 read/write module generation.")
@@ -211,7 +245,9 @@ def generate_ext_module_list(cpp_compilation, optim_level):
 
     logger.info("Retrieve C++ module filenames")
     cpp_files = _prepare_cpp_parsers_subpackage(overwrite=True, only_filenames=True)
-    flavor_files = [f for f in cpp_files if os.path.basename(f) != "_shared.cpp"]
+    flavor_files = [
+        f for f in cpp_files if not is_shared_chunk_filename(os.path.basename(f))
+    ]
 
     subpackage_prefix = "endf_parserpy.cpp_parsers."
     cpp_filepaths = [

@@ -19,6 +19,15 @@ from .cpp_boilerplate import generate_cmake_content
 
 
 SHARED_CPP_FILENAME = "_shared.cpp"
+SHARED_CHUNK_PREFIX = "_shared_part_"
+
+
+def _shared_chunk_filename(chunk_id):
+    return f"{SHARED_CHUNK_PREFIX}{chunk_id:02d}.cpp"
+
+
+def is_shared_chunk_filename(basename):
+    return basename == SHARED_CPP_FILENAME or basename.startswith(SHARED_CHUNK_PREFIX)
 
 
 def create_cpp_parser_module(
@@ -64,24 +73,49 @@ def create_project_files(
     create_cmake_file(project_path, module_name, overwrite=overwrite_files)
 
 
-def _prepare_cpp_parsers_subpackage(overwrite=False, only_filenames=False, dedup=True):
+def _prepare_cpp_parsers_subpackage(
+    overwrite=False, only_filenames=False, dedup=True, num_shared_chunks=None
+):
     """Generate per-flavor C++ pybind11 module sources.
 
     When ``dedup`` is True (default), parse and write function bodies
     that have an identical underlying ENDF recipe across multiple
-    flavors are emitted only once into a separate ``_shared.cpp``,
-    which is meant to be compiled once and linked into each flavor's
+    flavors are emitted only once into shared translation unit(s),
+    which the build system compiles and links into each flavor's
     extension module via ``extra_objects``.
+
+    Parameters
+    ----------
+    num_shared_chunks : Optional[int]
+        Number of shared translation units to spread the canonical
+        functions over so they can be compiled in parallel. ``None``
+        (default) consults the ``INSTALL_ENDF_PARSERPY_NUM_SHARED_CHUNKS``
+        environment variable, falling back to ``min(os.cpu_count(), 8)``.
+        Set to ``1`` to keep the legacy single-``_shared.cpp`` layout.
     """
+    if num_shared_chunks is None:
+        env_val = os.environ.get("INSTALL_ENDF_PARSERPY_NUM_SHARED_CHUNKS", "")
+        try:
+            num_shared_chunks = int(env_val) if env_val else min(os.cpu_count() or 1, 8)
+        except ValueError:
+            num_shared_chunks = min(os.cpu_count() or 1, 8)
+    num_shared_chunks = max(num_shared_chunks, 1)
+
     endf_flavors = list_endf_flavors()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     cpp_parsers_dir = os.path.join(script_dir, "../cpp_parsers")
     flavor_filenames = [f"{f.replace('-', '_')}.cpp" for f in endf_flavors]
     filenames = list(flavor_filenames)
     if dedup:
-        filenames.append(SHARED_CPP_FILENAME)
+        if num_shared_chunks == 1:
+            filenames.append(SHARED_CPP_FILENAME)
+        else:
+            filenames.extend(
+                _shared_chunk_filename(i) for i in range(num_shared_chunks)
+            )
     if only_filenames:
         return filenames
+
     shared_registry = {} if dedup else None
     for endf_flavor, module_file in zip(endf_flavors, flavor_filenames):
         print(f"---- compilation of {endf_flavor} ----")
@@ -97,16 +131,32 @@ def _prepare_cpp_parsers_subpackage(overwrite=False, only_filenames=False, dedup
             overwrite=overwrite,
             shared_registry=shared_registry,
         )
+
+    written_shared_files = []
     if dedup:
-        shared_path = os.path.join(cpp_parsers_dir, SHARED_CPP_FILENAME)
-        if not overwrite and os.path.exists(shared_path):
-            raise FileExistsError(f"The module {shared_path} exists already!")
+        chunks = generate_shared_cpp_code(shared_registry, num_chunks=num_shared_chunks)
         n_parse = len(shared_registry.get("parse", {}))
         n_write = len(shared_registry.get("write", {}))
         print(
-            f"---- writing {SHARED_CPP_FILENAME} with {n_parse} parse + "
-            f"{n_write} write deduplicated functions ----"
+            f"---- writing {len(chunks)} shared TU(s) with "
+            f"{n_parse} parse + {n_write} write deduplicated functions ----"
         )
-        with open(shared_path, "w") as f:
-            f.write(generate_shared_cpp_code(shared_registry))
+        for basename, content in chunks:
+            shared_path = os.path.join(cpp_parsers_dir, basename)
+            if not overwrite and os.path.exists(shared_path):
+                raise FileExistsError(f"The module {shared_path} exists already!")
+            with open(shared_path, "w") as f:
+                f.write(content)
+            written_shared_files.append(basename)
+        # If round-robin produced fewer chunks than requested (e.g. a
+        # chunk slot ended up empty), drop the missing names from the
+        # returned filename list so downstream build steps don't try to
+        # compile non-existent files.
+        if num_shared_chunks > 1 and len(written_shared_files) != num_shared_chunks:
+            shared_set = set(written_shared_files)
+            filenames = [
+                f
+                for f in filenames
+                if (not f.startswith(SHARED_CHUNK_PREFIX)) or f in shared_set
+            ]
     return filenames

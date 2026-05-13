@@ -47,25 +47,74 @@ def generate_cpp_module_code(recipes, module_name, shared_registry=None):
     return header + code
 
 
-def generate_shared_cpp_code(shared_registry):
-    """Emit the single ``_shared.cpp`` source that holds every unique
-    parse_recipe_<hash>_istream and write_recipe_<hash>_ostream body
+def generate_shared_cpp_code(shared_registry, num_chunks=1):
+    """Emit the shared TU(s) that hold every unique
+    ``parse_recipe_<hash>_istream`` / ``write_recipe_<hash>_ostream`` body
     collected across all flavors. Each flavor's .so links against the
-    object file produced from this source.
+    object files produced from these sources.
+
+    Parameters
+    ----------
+    shared_registry : dict
+        Registry populated by the per-flavor codegen pass. Keys
+        ``"parse"`` and ``"write"`` each map ``recipe_hash`` to
+        ``(canonical_name, function_code)``.
+    num_chunks : int
+        Number of output translation units to spread the canonical
+        functions across. ``num_chunks > 1`` lets the build system
+        compile the shared bodies in parallel; the chunks are stable
+        across builds (round-robin partition by lexicographic order of
+        ``recipe_hash``). The canonical functions never call each other,
+        so a function can land in any chunk without breaking the link
+        step.
+
+    Returns
+    -------
+    list[tuple[str, str]]
+        A list of ``(basename, source_text)`` pairs. With
+        ``num_chunks == 1`` the list has a single entry named
+        ``_shared.cpp`` (the legacy single-TU layout).
     """
-    parts = []
-    parts.append(cpp_boilerplate.module_header())
     parse_reg = shared_registry.get("parse", {})
     write_reg = shared_registry.get("write", {})
+    # Stable lexicographic order so chunk membership is deterministic
+    # across runs (no surprises in incremental builds / debugging).
+    parse_items = sorted(parse_reg.items())
+    write_items = sorted(write_reg.items())
+    if num_chunks <= 1:
+        return [("_shared.cpp", _format_shared_chunk(parse_items, write_items, None))]
+
+    chunks = []
+    for chunk_id in range(num_chunks):
+        chunk_parse = [
+            it for i, it in enumerate(parse_items) if i % num_chunks == chunk_id
+        ]
+        chunk_write = [
+            it for i, it in enumerate(write_items) if i % num_chunks == chunk_id
+        ]
+        if not chunk_parse and not chunk_write:
+            continue
+        basename = f"_shared_part_{chunk_id:02d}.cpp"
+        chunks.append(
+            (basename, _format_shared_chunk(chunk_parse, chunk_write, chunk_id))
+        )
+    return chunks
+
+
+def _format_shared_chunk(parse_items, write_items, chunk_id):
+    parts = [cpp_boilerplate.module_header()]
+    chunk_tag = "" if chunk_id is None else f" (chunk {chunk_id})"
     parts.append(
-        "// === Deduplicated parse functions (canonical names derived from recipe MD5) ===\n"
+        f"// === Deduplicated parse functions{chunk_tag} "
+        "(canonical names derived from recipe MD5) ===\n"
     )
-    for recipe_hash, (_canonical, code) in sorted(parse_reg.items()):
+    for recipe_hash, (_canonical, code) in parse_items:
         parts.append(code)
     parts.append(
-        "\n// === Deduplicated write functions (canonical names derived from recipe MD5) ===\n"
+        f"\n// === Deduplicated write functions{chunk_tag} "
+        "(canonical names derived from recipe MD5) ===\n"
     )
-    for recipe_hash, (_canonical, code) in sorted(write_reg.items()):
+    for recipe_hash, (_canonical, code) in write_items:
         parts.append(code)
     body = "".join(parts)
     md5hash = md5(body.encode()).hexdigest()
