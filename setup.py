@@ -93,6 +93,22 @@ class CustomBuildExt(pybind11_build_ext):
             overwrite=True, only_filenames=False
         )
 
+    def finalize_options(self):
+        super().finalize_options()
+        # Enable parallel compilation of the four large flavor extensions.
+        # setuptools' build_ext checks `self.parallel`; if set to N it
+        # builds N extensions concurrently via a ThreadPoolExecutor.
+        # Default to all CPU cores; user can override (or disable with `1`)
+        # via the INSTALL_ENDF_PARSERPY_NUM_BUILD_JOBS environment variable.
+        if not self.parallel:
+            jobs_env = os.environ.get("INSTALL_ENDF_PARSERPY_NUM_BUILD_JOBS", "")
+            try:
+                jobs = int(jobs_env) if jobs_env else (os.cpu_count() or 1)
+            except ValueError:
+                jobs = os.cpu_count() or 1
+            self.parallel = max(jobs, 1)
+            logger.info(f"Building C++ extensions with parallel={self.parallel}")
+
     def run(self):
         self._create_dynamic_files()
         super().run()
