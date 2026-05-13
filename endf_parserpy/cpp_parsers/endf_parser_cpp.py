@@ -149,6 +149,12 @@ class EndfParserCpp(EndfParserBase):
             Other choices are `endf6` for strict compliance with the
             ENDF-6 formats manual and `jendl` with JENDL specific
             conventions, which are also implemented in `endf6-ext`.
+        validate_control_records : bool
+            If ``True``, the C++ parser strictly verifies that the
+            MAT / MF / MT control record fields in every line of an
+            ENDF-6 section are consistent with the surrounding section
+            structure. Off by default; only the Python parser performs
+            this validation unconditionally. *(parsing, C++ only)*
         """
         self.read_opts = {
             "ignore_number_mismatch": ignore_number_mismatch,

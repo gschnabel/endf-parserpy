@@ -105,7 +105,7 @@ class CustomBuildExt(pybind11_build_ext):
 
     def finalize_options(self):
         super().finalize_options()
-        # Enable parallel compilation of the four large flavor extensions.
+        # Enable parallel compilation of the flavor extensions.
         # setuptools' build_ext checks `self.parallel`; if set to N it
         # builds N extensions concurrently via a ThreadPoolExecutor.
         # Default to all CPU cores; user can override (or disable with `1`)
