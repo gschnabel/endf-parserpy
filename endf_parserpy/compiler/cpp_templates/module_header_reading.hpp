@@ -290,15 +290,32 @@ double endfstr2float(const char* str, ParsingOptions &parse_opts) {
 
 
 int endfstr2int(const char* str, ParsingOptions &parse_opts) {
-  char strzero[12];
-  std::memcpy(strzero, str, 11);
-  strzero[11] = '\0';
-  for (int i=0; i < 11; i++) {
-    if (str[i] != ' ') {
-      return std::atoi(strzero);
-    }
+  // Locate first/last non-space so we can both detect blank fields
+  // (ENDF convention: blank == 0) and detect trailing garbage like "0.0".
+  int start = 0;
+  while (start < 11 && str[start] == ' ') start++;
+  if (start == 11) return 0;
+  int end = 10;
+  while (end > start && str[end] == ' ') end--;
+  char buf[12];
+  int len = end - start + 1;
+  std::memcpy(buf, str + start, len);
+  buf[len] = '\0';
+  // Strict integer parse: reject anything `std::atoi` would have silently
+  // truncated (e.g. "0.000000+0" -> 0, "4.000000-6" -> 4). Mirrors the
+  // Python parser's read_fort_int, which calls int(valstr) and rejects
+  // any float-shaped string.
+  errno = 0;
+  char *endptr;
+  long val = std::strtol(buf, &endptr, 10);
+  if (endptr == buf || *endptr != '\0' || errno == ERANGE
+      || val < INT_MIN || val > INT_MAX) {
+    std::stringstream errmsg;
+    errmsg << "invalid integer in field: \""
+           << std::string(str, 11) << "\".";
+    throw std::runtime_error(errmsg.str());
   }
-  return 0;
+  return static_cast<int>(val);
 }
 
 // case for EndfFloatCpp

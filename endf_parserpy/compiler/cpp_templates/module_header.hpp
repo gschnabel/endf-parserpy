@@ -15,8 +15,10 @@
 #include <cassert>
 #include <algorithm>  // for std::sort
 #include <cstddef>
-#include <cstdlib>    // for std::strtod
+#include <cstdlib>    // for std::strtod / std::strtol
 #include <cmath>      // for std::isfinite
+#include <cerrno>     // for errno (ERANGE)
+#include <climits>    // for INT_MIN / INT_MAX
 
 // When Python merges the various
 // C++ files, there is no need
