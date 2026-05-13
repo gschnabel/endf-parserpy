@@ -540,8 +540,12 @@ template<typename T>
 std::vector<T> cpp_read_vec(
   std::istream& cont, const int numel, int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
-  int j = 0;
   std::vector<T> res;
+  // Empty body: do not consume a line. This matters for e.g. TAB1 records
+  // with NP=0 (an empty interpolation table) which TENDL emits for some
+  // metastable evaluations. Consuming a line here would eat the SEND record.
+  if (numel <= 0) return res;
+  int j = 0;
   std::string line = cpp_read_line(cont, mat, mf, mt, parse_opts);
   for (int i=0; i < numel; i++) {
     res.push_back(cpp_read_field<T>(line.c_str(), j++, parse_opts));
@@ -558,8 +562,12 @@ template<typename T>
 std::vector<T> cpp_read_vec_debug(
   std::istream& cont, std::string& line, const int numel, int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
-  int j = 0;
   std::vector<T> res;
+  if (numel <= 0) {
+    line = "";
+    return res;
+  }
+  int j = 0;
   std::ostringstream oss;
   std::string curline = cpp_read_line(cont, mat, mf, mt, parse_opts);
   for (int i=0; i < numel; i++) {
