@@ -50,7 +50,7 @@ struct Tab2Body {
 };
 
 
-bool seq_contains(py::sequence seq, py::object value) {
+inline bool seq_contains(py::sequence seq, py::object value) {
   int i = 0;
   for (const auto& item : seq) {
     if (py::cast<py::object>(item).equal(value)) {
@@ -61,7 +61,7 @@ bool seq_contains(py::sequence seq, py::object value) {
 }
 
 
-bool should_parse_section(int mf, int mt, py::object& exclude, py::object& include) {
+inline bool should_parse_section(int mf, int mt, py::object& exclude, py::object& include) {
   py::tuple mf_mt_tup = py::make_tuple(mf, mt);
   if (! exclude.is_none()) {
     if (! py::isinstance<py::sequence>(exclude)) {

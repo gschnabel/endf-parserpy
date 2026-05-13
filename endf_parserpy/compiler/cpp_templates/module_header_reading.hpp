@@ -28,7 +28,7 @@ struct ParsingOptions {
 };
 
 
-ParsingOptions default_parsing_options() {
+inline ParsingOptions default_parsing_options() {
   return ParsingOptions{
     false,  // ignore_number_mismatch
     true,  // ignore_zero_mismatch
@@ -155,7 +155,7 @@ namespace pybind11 { namespace detail {
 }}
 
 
-py::object py_create_container(bool list_mode) {
+inline py::object py_create_container(bool list_mode) {
     if (list_mode) {
         return py::list();
     } else {
@@ -164,7 +164,7 @@ py::object py_create_container(bool list_mode) {
 }
 
 
-py::object py_append_container(py::object pyobj, int key, bool list_mode, py::object elem=py::none()) {
+inline py::object py_append_container(py::object pyobj, int key, bool list_mode, py::object elem=py::none()) {
     if (list_mode) {
         if (elem.is_none()) {
             elem = py::list();
@@ -182,7 +182,7 @@ py::object py_append_container(py::object pyobj, int key, bool list_mode, py::ob
 
 
 template<typename U, typename V, typename W>
-void throw_mismatch_error(
+inline void throw_mismatch_error(
   U quantity, V expected_value, W actual_value,
   std::string line, std::string template_line
 ) {
@@ -201,7 +201,7 @@ void throw_mismatch_error(
 
 
 template<typename V, typename W>
-void throw_number_mismatch_error(
+inline void throw_number_mismatch_error(
   V expected_value, W actual_value,
   std::string line, std::string template_line
 ) {
@@ -218,7 +218,7 @@ void throw_number_mismatch_error(
 }
 
 
-double endfstr2float(const char* str, ParsingOptions &parse_opts) {
+inline double endfstr2float(const char* str, ParsingOptions &parse_opts) {
   char tbuf[13];
   int j = 0;
   bool in_number = false;
@@ -289,7 +289,7 @@ double endfstr2float(const char* str, ParsingOptions &parse_opts) {
 }
 
 
-int endfstr2int(const char* str, ParsingOptions &parse_opts) {
+inline int endfstr2int(const char* str, ParsingOptions &parse_opts) {
   // Locate first/last non-space so we can both detect blank fields
   // (ENDF convention: blank == 0) and detect trailing garbage like "0.0".
   int start = 0;
@@ -319,7 +319,7 @@ int endfstr2int(const char* str, ParsingOptions &parse_opts) {
 }
 
 // case for EndfFloatCpp
-EndfFloatCpp cpp_read_field_EndfFloatCpp(
+inline EndfFloatCpp cpp_read_field_EndfFloatCpp(
   const char *str, const char fieldnum, ParsingOptions &parse_opts
 ) {
   double float_value = endfstr2float(str+fieldnum*11, parse_opts);
@@ -333,7 +333,7 @@ EndfFloatCpp cpp_read_field_EndfFloatCpp(
 
 
 template<typename T>
-T cpp_read_field(const char *str, const char fieldnum, ParsingOptions &parse_opts) {
+inline T cpp_read_field(const char *str, const char fieldnum, ParsingOptions &parse_opts) {
   static_assert(
     std::is_same<T, EndfFloatCpp>::value
     || std::is_same<T, int>::value
@@ -355,7 +355,7 @@ T cpp_read_field(const char *str, const char fieldnum, ParsingOptions &parse_opt
 // for different types (in particular std::vector and std::string)
 
 template<typename T>
-typename std::enable_if<std::is_scalar<T>::value, bool>::type
+inline typename std::enable_if<std::is_scalar<T>::value, bool>::type
 is_zero_check(const T value) {
   return value == 0;
 }
@@ -425,7 +425,7 @@ cpp_validate_field(
 
 // we are done with the cpp_validate_field related functionality
 
-int cpp_read_custom_int_field(const char *str, int start_pos, int length) {
+inline int cpp_read_custom_int_field(const char *str, int start_pos, int length) {
   std::vector<char> strzero(length+1);
   std::memcpy(strzero.data(), str+start_pos, length);
   strzero[length] = '\0';
@@ -438,22 +438,22 @@ int cpp_read_custom_int_field(const char *str, int start_pos, int length) {
 }
 
 
-int cpp_read_mat_number(const char *str) {
+inline int cpp_read_mat_number(const char *str) {
   return cpp_read_custom_int_field(str, 66, 4);
 }
 
 
-int cpp_read_mf_number(const char *str) {
+inline int cpp_read_mf_number(const char *str) {
   return cpp_read_custom_int_field(str, 70, 2);
 }
 
 
-int cpp_read_mt_number(const char *str) {
+inline int cpp_read_mt_number(const char *str) {
   return cpp_read_custom_int_field(str, 72, 3);
 }
 
 
-bool cpp_is_blank_line(std::string line) {
+inline bool cpp_is_blank_line(std::string line) {
   for (int i=0; i < line.size(); i++) {
     if (line[i] != ' ') return false;
   }
@@ -461,14 +461,14 @@ bool cpp_is_blank_line(std::string line) {
 }
 
 
-std::string cpp_read_raw_line(std::istream& cont) {
+inline std::string cpp_read_raw_line(std::istream& cont) {
   std::string line;
   std::getline(cont, line);
   return line;
 }
 
 
-std::string cpp_read_line(
+inline std::string cpp_read_line(
   std::istream& cont, int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
   std::string line;
@@ -500,7 +500,7 @@ std::string cpp_read_line(
 }
 
 
-std::string cpp_read_send(std::istream& cont, int mat, int mf, ParsingOptions &parse_opts) {
+inline std::string cpp_read_send(std::istream& cont, int mat, int mf, ParsingOptions &parse_opts) {
   std::string line = cpp_read_line(cont, mat, mf, 0, parse_opts);
   int mtnum = cpp_read_mt_number(line.c_str());
   if (cpp_read_field<DOUBLE_TYPE>(line.c_str(), 0, parse_opts) != 0.0 ||
@@ -528,7 +528,7 @@ std::string cpp_read_send(std::istream& cont, int mat, int mf, ParsingOptions &p
 }
 
 
-bool cpp_is_fend_record(std::string line, int mat, ParsingOptions &parse_opts) {
+inline bool cpp_is_fend_record(std::string line, int mat, ParsingOptions &parse_opts) {
   int curmat = cpp_read_mat_number(line.c_str());
   if (mat != curmat && parse_opts.validate_control_records) {
       throw_mismatch_error("MAT", mat, curmat, line, "");
@@ -547,7 +547,7 @@ bool cpp_is_fend_record(std::string line, int mat, ParsingOptions &parse_opts) {
 }
 
 
-bool cpp_is_mend_record(std::string line, ParsingOptions &parse_opts) {
+inline bool cpp_is_mend_record(std::string line, ParsingOptions &parse_opts) {
   int mat = cpp_read_mat_number(line.c_str());
   bool cond = cpp_is_fend_record(line, 0, parse_opts);
   cond &= (mat == 0);
@@ -555,7 +555,7 @@ bool cpp_is_mend_record(std::string line, ParsingOptions &parse_opts) {
 }
 
 
-bool cpp_is_tend_record(std::string line, ParsingOptions &parse_opts) {
+inline bool cpp_is_tend_record(std::string line, ParsingOptions &parse_opts) {
   int mat = cpp_read_mat_number(line.c_str());
   bool cond = cpp_is_fend_record(line, -1, parse_opts);
   cond &= (mat == -1);
@@ -564,7 +564,7 @@ bool cpp_is_tend_record(std::string line, ParsingOptions &parse_opts) {
 
 
 template<typename T>
-std::vector<T> cpp_read_vec(
+inline std::vector<T> cpp_read_vec(
   std::istream& cont, const int numel, int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
   std::vector<T> res;
@@ -586,7 +586,7 @@ std::vector<T> cpp_read_vec(
 
 
 template<typename T>
-std::vector<T> cpp_read_vec_debug(
+inline std::vector<T> cpp_read_vec_debug(
   std::istream& cont, std::string& line, const int numel, int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
   std::vector<T> res;
@@ -611,7 +611,7 @@ std::vector<T> cpp_read_vec_debug(
 }
 
 
-Tab2Body read_tab2_body_debug(
+inline Tab2Body read_tab2_body_debug(
   std::istream& cont, std::string& line, int nr, int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
   std::ostringstream oss;
@@ -629,7 +629,7 @@ Tab2Body read_tab2_body_debug(
 }
 
 
-Tab2Body read_tab2_body(
+inline Tab2Body read_tab2_body(
   std::istream& cont, int nr, int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
   Tab2Body tab_body;
@@ -643,7 +643,7 @@ Tab2Body read_tab2_body(
 }
 
 
-Tab1Body read_tab1_body_debug(
+inline Tab1Body read_tab1_body_debug(
   std::istream& cont, std::string& line, int nr, int np,
   int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
@@ -669,7 +669,7 @@ Tab1Body read_tab1_body_debug(
 }
 
 
-Tab1Body read_tab1_body(
+inline Tab1Body read_tab1_body(
   std::istream& cont, int nr, int np,
   int mat, int mf, int mt, ParsingOptions &parse_opts
 ) {
@@ -690,7 +690,7 @@ Tab1Body read_tab1_body(
 }
 
 
-std::vector<std::string> read_section_verbatim(
+inline std::vector<std::string> read_section_verbatim(
     int mat, int mf, int mt, std::istream& cont, bool is_first, ParsingOptions &parse_opts
 ) {
   std::streampos curpos;

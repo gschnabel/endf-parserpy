@@ -24,7 +24,7 @@ struct WritingOptions {
 };
 
 
-WritingOptions default_writing_options() {
+inline WritingOptions default_writing_options() {
   return WritingOptions{
     false,  // abuse_signpos
     false,  // keep_E
@@ -112,34 +112,34 @@ namespace pybind11 { namespace detail {
 }}
 
 
-void cpp_write_custom_int_field(std::string &str, int start, int length, int value) {
+inline void cpp_write_custom_int_field(std::string &str, int start, int length, int value) {
   std::ostringstream oss;
   oss << std::right << std::setw(length) << value;
   str.replace(start, length, oss.str());
 }
 
 
-void cpp_write_mat_number(std::string& str, int value) {
+inline void cpp_write_mat_number(std::string& str, int value) {
   cpp_write_custom_int_field(str, 66, 4, value);
 }
 
 
-void cpp_write_mf_number(std::string& str, int value) {
+inline void cpp_write_mf_number(std::string& str, int value) {
   cpp_write_custom_int_field(str, 70, 2, value);
 }
 
 
-void cpp_write_mt_number(std::string& str, int value) {
+inline void cpp_write_mt_number(std::string& str, int value) {
   cpp_write_custom_int_field(str, 72, 3, value);
 }
 
 
-void cpp_write_line_number(std::string& str, int value) {
+inline void cpp_write_line_number(std::string& str, int value) {
   cpp_write_custom_int_field(str, 75, 5, value);
 }
 
 
-std::string cpp_prepare_line(
+inline std::string cpp_prepare_line(
   int mat, int mf, int mt, int &linenum, WritingOptions &write_opts
 ) {
   int line_width = (write_opts.include_linenum) ? 80 : 75;
@@ -156,7 +156,7 @@ std::string cpp_prepare_line(
 }
 
 
-void normalize_exponent(std::string& numstr) {
+inline void normalize_exponent(std::string& numstr) {
   size_t strsize = numstr.size();
   size_t zerostart = std::string::npos;
   size_t exp_pos = numstr.find("e");
@@ -176,7 +176,7 @@ void normalize_exponent(std::string& numstr) {
 }
 
 
-std::string get_scientific_numstr(double value, int precision, bool abuse_signpos) {
+inline std::string get_scientific_numstr(double value, int precision, bool abuse_signpos) {
   std::ostringstream oss;
   oss << std::scientific << std::setprecision(precision) << value;
   std::string numstr = oss.str();
@@ -188,7 +188,7 @@ std::string get_scientific_numstr(double value, int precision, bool abuse_signpo
 }
 
 
-std::string float2endfstr_helper(double value, size_t width, WritingOptions &write_opts)
+inline std::string float2endfstr_helper(double value, size_t width, WritingOptions &write_opts)
 {
   std::string numstr = get_scientific_numstr(value, 6, write_opts.abuse_signpos);
   // re-calculate precision to match width specification
@@ -215,7 +215,7 @@ std::string float2endfstr_helper(double value, size_t width, WritingOptions &wri
 }
 
 
-std::string float2endfstr_decimal_helper(
+inline std::string float2endfstr_decimal_helper(
   double value, int width, WritingOptions &write_opts
 ) {
   std::stringstream ss;
@@ -268,7 +268,7 @@ std::string float2endfstr_decimal_helper(
 }
 
 
-std::string float2endfstr(double value, WritingOptions &write_opts) {
+inline std::string float2endfstr(double value, WritingOptions &write_opts) {
   std::ostringstream oss;
   std::string numstr;
   int width = 11;
@@ -317,14 +317,14 @@ std::string float2endfstr(double value, WritingOptions &write_opts) {
 }
 
 
-std::string int2endfstr(int value) {
+inline std::string int2endfstr(int value) {
   std::ostringstream oss;
   oss << std::right << std::setw(11) << value;
   return oss.str();
 }
 
 
-void field_size_check(const std::string& field) {
+inline void field_size_check(const std::string& field) {
   if (field.size() != 11) {
     throw std::runtime_error(
       std::string("wrong size")
@@ -336,7 +336,7 @@ void field_size_check(const std::string& field) {
 
 
 // value is float case
-void cpp_write_field_double(
+inline void cpp_write_field_double(
   std::string& line, const char fieldnum, const double& value,
   WritingOptions& write_opts
 ) {
@@ -347,7 +347,7 @@ void cpp_write_field_double(
 
 
 // value is EndfFloatCpp case
-void cpp_write_field_EndfFloatCpp(
+inline void cpp_write_field_EndfFloatCpp(
   std::string& line, const char fieldnum, const EndfFloatCpp& value,
   WritingOptions& write_opts
 ) {
@@ -364,7 +364,7 @@ void cpp_write_field_EndfFloatCpp(
 
 
 // value is int case
-void cpp_write_field_int(
+inline void cpp_write_field_int(
   std::string& line, const char fieldnum, const int& value,
   WritingOptions& write_opts
 ) {
@@ -395,7 +395,7 @@ template<typename T>
 }
 
 
-void write_tab1_body(
+inline void write_tab1_body(
   std::string& line, Tab1Body tab_body, int mat, int mf, int mt, int& linenum, WritingOptions &write_opts
 ) {
   assert(tab_body.INT.size() == tab_body.NBT.size() && "INT and NBT must have same size");
@@ -432,7 +432,7 @@ void write_tab1_body(
 }
 
 
-void write_tab2_body(
+inline void write_tab2_body(
   std::string& line, Tab2Body tab_body, int mat, int mf, int mt, int& linenum, WritingOptions &write_opts
 ) {
   assert(tab_body.INT.size() == tab_body.NBT.size() && "INT and NBT must have same size");
@@ -454,7 +454,7 @@ void write_tab2_body(
 }
 
 
-std::string cpp_prepare_send(
+inline std::string cpp_prepare_send(
   int mat, int mf, WritingOptions &write_opts, bool newline=true) {
   int line_width = (write_opts.include_linenum) ? 80 : 75;
   std::string line(line_width, ' ');
@@ -482,7 +482,7 @@ std::string cpp_prepare_send(
 }
 
 
-int get_mat_from_mfmt_section(py::object mfmt_section) {
+inline int get_mat_from_mfmt_section(py::object mfmt_section) {
   int mat;
   if (py::isinstance<py::dict>(mfmt_section)) {
     py::dict mfmt_section_dict = py::cast<py::dict>(mfmt_section);
@@ -505,7 +505,7 @@ int get_mat_from_mfmt_section(py::object mfmt_section) {
 }
 
 
-void write_section_verbatim(
+inline void write_section_verbatim(
   std::ostream& oss, py::list mfmt_section, WritingOptions &write_opts
 ) {
   if (mfmt_section.size() == 0) {

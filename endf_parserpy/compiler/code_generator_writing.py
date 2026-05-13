@@ -3,13 +3,14 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/05/12
-# Last modified:   2025/07/04
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2024-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
 
+from hashlib import md5
 from .code_generator_core import generate_vardefs, generate_code_from_parsetree
 from . import cpp_boilerplate
 from . import cpp_boilerplate_writing
@@ -81,6 +82,27 @@ def mf_mt_writefun_name(mf, mt):
     if mt is None or mt == -1:
         return f"write_mf{mf}"
     return f"write_mf{mf}mt{mt}"
+
+
+def _canonical_writefun_name(recipe):
+    """Recipe-hash-derived canonical name for the writing side. See
+    :func:`code_generator_parsing._canonical_parsefun_name` for the
+    rationale and collision argument.
+    """
+    return "write_recipe_" + md5(recipe.encode()).hexdigest()[:16]
+
+
+def _split_wrapper_names(entry):
+    if isinstance(entry, (tuple, list)):
+        return entry[0], entry[1]
+    return entry, entry
+
+
+def _writefun_forward_decl(ostream_name):
+    return cpp.line(
+        f"void {ostream_name}(std::ostream& cont, py::dict endf_dict, "
+        "WritingOptions& write_opts);"
+    )
 
 
 def _mf_mt_dict_varname(mf, mt):
@@ -496,10 +518,11 @@ def generate_cpp_writefun_wrappers_string(writefuns, *extra_args):
     args_str2 = ", ".join(arg[1] for arg in extra_args)
     args_str2 = ", " + args_str2 if args_str2 != "" else args_str2
     code = ""
-    for p in writefuns:
-        code += cpp.line(f"std::string {p}(py::dict endf_dict{args_str}) {{")
+    for entry in writefuns:
+        outer, inner = _split_wrapper_names(entry)
+        code += cpp.line(f"std::string {outer}(py::dict endf_dict{args_str}) {{")
         code += cpp.statement("std::ostringstream oss", cpp.INDENT)
-        code += cpp.statement(f"{p}_ostream(oss, endf_dict{args_str2})", cpp.INDENT)
+        code += cpp.statement(f"{inner}_ostream(oss, endf_dict{args_str2})", cpp.INDENT)
         code += cpp.statement("return oss.str()", cpp.INDENT)
         code += cpp.close_block()
         code += cpp.line("")
@@ -512,9 +535,10 @@ def generate_cpp_writefun_wrappers_file(writefuns, *extra_args):
     args_str2 = ", ".join(arg[1] for arg in extra_args)
     args_str2 = ", " + args_str2 if args_str2 != "" else args_str2
     code = ""
-    for p in writefuns:
+    for entry in writefuns:
+        outer, inner = _split_wrapper_names(entry)
         code += cpp.line(
-            f"void {p}_file(std::string& filename, py::dict endf_dict{args_str}) {{"
+            f"void {outer}_file(std::string& filename, py::dict endf_dict{args_str}) {{"
         )
         code += cpp.statement(
             "std::ofstream outfile(filename, std::ios::binary)", cpp.INDENT
@@ -529,43 +553,70 @@ def generate_cpp_writefun_wrappers_file(writefuns, *extra_args):
             ),
             cpp.INDENT,
         )
-        code += cpp.statement(f"{p}_ostream(outfile, endf_dict{args_str2})", cpp.INDENT)
+        code += cpp.statement(
+            f"{inner}_ostream(outfile, endf_dict{args_str2})", cpp.INDENT
+        )
         code += cpp.statement("outfile.close()", cpp.INDENT)
         code += cpp.close_block()
         code += cpp.line("")
     return code
 
 
-def generate_all_cpp_writefuns_code(recipes, module_name):
+def generate_all_cpp_writefuns_code(recipes, module_name, shared_registry=None):
+    """Mirror of :func:`code_generator_parsing.generate_all_cpp_parsefuns_code`
+    for the write side. With ``shared_registry`` provided, deduplicate
+    write_recipe_<hash>_ostream bodies across flavors into _shared.cpp.
+    """
+    dedup = shared_registry is not None
     writefuns_code = ""
-    func_names = []
+    wrapper_entries = []
     recipefuns = {}
+    forward_decls_seen = set()
+    if dedup:
+        write_reg = shared_registry.setdefault("write", {})
+
+    def _route(recipe, outer_name, mf, mt_):
+        nonlocal writefuns_code
+        if not dedup:
+            writefuns_code += generate_cpp_writefun(
+                outer_name + "_ostream", recipe, mf=mf, mt=mt_
+            )
+            return outer_name
+        recipe_hash = md5(recipe.encode()).hexdigest()
+        canonical = _canonical_writefun_name(recipe)
+        canonical_ostream = canonical + "_ostream"
+        if recipe_hash not in write_reg:
+            write_reg[recipe_hash] = (
+                canonical,
+                generate_cpp_writefun(canonical_ostream, recipe, mf=mf, mt=mt_),
+            )
+        if canonical_ostream not in forward_decls_seen:
+            writefuns_code += _writefun_forward_decl(canonical_ostream)
+            forward_decls_seen.add(canonical_ostream)
+        return canonical
+
     for mf, mt_recipes in recipes.items():
         if isinstance(mt_recipes, str):
             print(f"MF: {mf}")
-            func_name = mf_mt_writefun_name(mf, None)
-            func_names.append(func_name)
-            recipe = mt_recipes
-            writefuns_code += generate_cpp_writefun(
-                func_name + "_ostream", recipe, mf=mf, mt=None
-            )
-            recipefuns[mf] = func_name
+            outer_name = mf_mt_writefun_name(mf, None)
+            inner_name = _route(mt_recipes, outer_name, mf=mf, mt_=None)
+            wrapper_entries.append((outer_name, inner_name))
+            recipefuns[mf] = inner_name
             continue
         for mt, recipe in mt_recipes.items():
             print(f"MF: {mf} MT: {mt}")
-            func_name = mf_mt_writefun_name(mf, mt)
-            func_names.append(func_name)
+            outer_name = mf_mt_writefun_name(mf, mt)
             mt_ = mt if mt != -1 else None
-            writefuns_code += generate_cpp_writefun(
-                func_name + "_ostream", recipe, mf=mf, mt=mt_
-            )
+            inner_name = _route(recipe, outer_name, mf=mf, mt_=mt_)
+            wrapper_entries.append((outer_name, inner_name))
             curdic = recipefuns.setdefault(mf, {})
-            curdic[mt] = func_name
+            curdic[mt] = inner_name
+
     writefun_wrappers_code1 = generate_cpp_writefun_wrappers_string(
-        func_names, ("WritingOptions", "write_opts")
+        wrapper_entries, ("WritingOptions", "write_opts")
     )
     writefun_wrappers_code2 = generate_cpp_writefun_wrappers_file(
-        func_names, ("WritingOptions", "write_opts")
+        wrapper_entries, ("WritingOptions", "write_opts")
     )
     # special case for the master function calling the other mf/mt parser funs
     master_writefun_code = generate_master_writefun("write_endf_ostream", recipefuns)

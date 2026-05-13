@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/05/06
-# Last modified:   2024/05/06
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2024 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -46,7 +46,7 @@ def construct_vartype_dtype_enum():
 
 
 def construct_vartype2str_func():
-    code = cpp.line("std::string vartype2str(vartype vt) {")
+    code = cpp.line("inline std::string vartype2str(vartype vt) {")
     dtypes = get_available_dtypes()
     specialtypes = get_vartype_names()
     icode = cpp.line("switch (vt) {")
@@ -70,7 +70,7 @@ def construct_vartype2str_func():
 
 def construct_vartype_validation_func():
     code = r"""
-    void validate_vartype_consistency(std::string varname, vartype current_type, vartype expected_type) {
+    inline void validate_vartype_consistency(std::string varname, vartype current_type, vartype expected_type) {
       if (current_type != expected_type && expected_type != UNKNOWN) {
         std::string current_type_str = vartype2str(current_type);
         std::string expected_type_str = vartype2str(expected_type);

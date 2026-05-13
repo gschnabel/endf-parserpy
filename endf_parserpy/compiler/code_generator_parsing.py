@@ -10,6 +10,7 @@
 ############################################################
 
 
+from hashlib import md5
 from .code_generator_core import generate_vardefs, generate_code_from_parsetree
 from . import cpp_boilerplate
 from . import cpp_boilerplate_reading
@@ -66,6 +67,17 @@ def mf_mt_parsefun_name(mf, mt):
     if mt is None or mt == -1:
         return f"parse_mf{mf}"
     return f"parse_mf{mf}mt{mt}"
+
+
+def _canonical_parsefun_name(recipe):
+    """Stable name derived only from the ENDF recipe text. Two distinct
+    (mf, mt) pairs that share recipe text get the same canonical name, so
+    the corresponding parser function can be emitted once into _shared.cpp
+    and reused by every flavor that references it. The truncated 16-hex
+    prefix is well below birthday-bound for the few hundred functions
+    involved.
+    """
+    return "parse_recipe_" + md5(recipe.encode()).hexdigest()[:16]
 
 
 def _mf_mt_dict_varname(mf, mt):
@@ -463,16 +475,27 @@ def generate_master_parsefun(name, recipefuns):
     return code
 
 
+def _split_wrapper_names(entry):
+    """Accept either a single name string (legacy) or a (outer, inner_istream)
+    pair. Returns ``(outer_name, inner_callee_name)`` where the wrapper is
+    named ``outer_name`` and its body calls ``inner_callee_name + '_istream'``.
+    """
+    if isinstance(entry, (tuple, list)):
+        return entry[0], entry[1]
+    return entry, entry
+
+
 def generate_cpp_parsefun_wrappers_string(parsefuns, *extra_args):
     args_str = ", ".join(arg[0] + " " + arg[1] for arg in extra_args)
     args_str = ", " + args_str if args_str != "" else args_str
     args_str2 = ", ".join(arg[1] for arg in extra_args)
     args_str2 = ", " + args_str2 if args_str2 != "" else args_str2
     code = ""
-    for p in parsefuns:
-        code += cpp.line(f"py::dict {p}(std::string& strcont{args_str}) {{")
+    for entry in parsefuns:
+        outer, inner = _split_wrapper_names(entry)
+        code += cpp.line(f"py::dict {outer}(std::string& strcont{args_str}) {{")
         code += cpp.statement("std::istringstream iss(strcont)", cpp.INDENT)
-        code += cpp.statement(f"return {p}_istream(iss{args_str2})", cpp.INDENT)
+        code += cpp.statement(f"return {inner}_istream(iss{args_str2})", cpp.INDENT)
         code += cpp.close_block()
         code += cpp.line("")
     return code
@@ -484,8 +507,9 @@ def generate_cpp_parsefun_wrappers_file(parsefuns, *extra_args):
     args_str2 = ", ".join(arg[1] for arg in extra_args)
     args_str2 = ", " + args_str2 if args_str2 != "" else args_str2
     code = ""
-    for p in parsefuns:
-        code += cpp.line(f"py::dict {p}_file(std::string& filename{args_str}) {{")
+    for entry in parsefuns:
+        outer, inner = _split_wrapper_names(entry)
+        code += cpp.line(f"py::dict {outer}_file(std::string& filename{args_str}) {{")
         code += cpp.statement(
             "std::ifstream inpfile(filename, std::ios::binary)", cpp.INDENT
         )
@@ -495,42 +519,81 @@ def generate_cpp_parsefun_wrappers_file(parsefuns, *extra_args):
                 "throw std::ifstream::failure" + '("failed to open file " + filename)'
             ),
         )
-        code += cpp.statement(f"return {p}_istream(inpfile{args_str2})", cpp.INDENT)
+        code += cpp.statement(f"return {inner}_istream(inpfile{args_str2})", cpp.INDENT)
         code += cpp.close_block()
         code += cpp.line("")
     return code
 
 
-def generate_all_cpp_parsefuns_code(recipes, module_name):
+def _parsefun_forward_decl(istream_name):
+    return cpp.line(
+        f"py::dict {istream_name}(std::istream& cont, ParsingOptions& parse_opts);"
+    )
+
+
+def generate_all_cpp_parsefuns_code(recipes, module_name, shared_registry=None):
+    """Generate all per-(mf, mt) parse functions plus wrappers, master
+    dispatcher, and pybind glue for one ENDF flavor.
+
+    When ``shared_registry`` is provided (dict with keys ``"parse"`` and
+    ``"write"``), per-recipe parse function bodies are deduplicated across
+    flavors via canonical recipe-hash-derived names. The full body is
+    stored in the registry only the first time a given recipe hash is
+    encountered; subsequent encounters (whether in the same flavor or in a
+    later flavor) just emit a forward declaration in the per-flavor code
+    so the dispatcher and wrappers can link to the canonical symbol that
+    will be compiled once into ``_shared.cpp``.
+    """
+    dedup = shared_registry is not None
     parsefuns_code = ""
-    func_names = []
+    wrapper_entries = []  # list of (outer_name, canonical_callee_name)
     recipefuns = {}
+    forward_decls_seen = set()
+    if dedup:
+        parse_reg = shared_registry.setdefault("parse", {})
+
+    def _route(recipe, outer_name, mf, mt_):
+        nonlocal parsefuns_code
+        if not dedup:
+            parsefuns_code += generate_cpp_parsefun(
+                outer_name + "_istream", recipe, mf=mf, mt=mt_
+            )
+            return outer_name
+        recipe_hash = md5(recipe.encode()).hexdigest()
+        canonical = _canonical_parsefun_name(recipe)
+        canonical_istream = canonical + "_istream"
+        if recipe_hash not in parse_reg:
+            parse_reg[recipe_hash] = (
+                canonical,
+                generate_cpp_parsefun(canonical_istream, recipe, mf=mf, mt=mt_),
+            )
+        if canonical_istream not in forward_decls_seen:
+            parsefuns_code += _parsefun_forward_decl(canonical_istream)
+            forward_decls_seen.add(canonical_istream)
+        return canonical
+
     for mf, mt_recipes in recipes.items():
         if isinstance(mt_recipes, str):
             print(f"MF: {mf}")
-            func_name = mf_mt_parsefun_name(mf, None)
-            func_names.append(func_name)
-            recipe = mt_recipes
-            parsefuns_code += generate_cpp_parsefun(
-                func_name + "_istream", recipe, mf=mf, mt=None
-            )
-            recipefuns[mf] = func_name
+            outer_name = mf_mt_parsefun_name(mf, None)
+            inner_name = _route(mt_recipes, outer_name, mf=mf, mt_=None)
+            wrapper_entries.append((outer_name, inner_name))
+            recipefuns[mf] = inner_name
             continue
         for mt, recipe in mt_recipes.items():
             print(f"MF: {mf} MT: {mt}")
-            func_name = mf_mt_parsefun_name(mf, mt)
-            func_names.append(func_name)
+            outer_name = mf_mt_parsefun_name(mf, mt)
             mt_ = mt if mt != -1 else None
-            parsefuns_code += generate_cpp_parsefun(
-                func_name + "_istream", recipe, mf=mf, mt=mt_
-            )
+            inner_name = _route(recipe, outer_name, mf=mf, mt_=mt_)
+            wrapper_entries.append((outer_name, inner_name))
             curdic = recipefuns.setdefault(mf, {})
-            curdic[mt] = func_name
+            curdic[mt] = inner_name
+
     parsefun_wrappers_code1 = generate_cpp_parsefun_wrappers_string(
-        func_names, ("ParsingOptions", "parse_opts")
+        wrapper_entries, ("ParsingOptions", "parse_opts")
     )
     parsefun_wrappers_code2 = generate_cpp_parsefun_wrappers_file(
-        func_names, ("ParsingOptions", "parse_opts")
+        wrapper_entries, ("ParsingOptions", "parse_opts")
     )
     # special case for the master function calling the other mf/mt parser funs
     master_parsefun_code = generate_master_parsefun("parse_endf_istream", recipefuns)

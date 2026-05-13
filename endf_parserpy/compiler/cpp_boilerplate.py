@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/04/12
-# Last modified:   2025/07/22
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2024-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -22,6 +22,18 @@ from .cpp_boilerplate_reading import (
     module_header_reading,
 )
 from .cpp_boilerplate_writing import module_header_writing
+
+
+# Free helper functions in the C++ boilerplate (templates and
+# generators) are marked ``inline`` at source so the same boilerplate
+# can be safely concatenated into both ``_shared.cpp`` and each flavor's
+# ``.cpp``. When both are linked into the same .so, the relaxed-ODR
+# semantics of ``inline`` avoid duplicate-symbol errors.
+#
+# When adding a new helper to ``cpp_templates/*.hpp`` (or to any function
+# emitter in this package), mark it with the ``inline`` keyword. Class
+# methods and template-class members are implicitly inline so they need
+# no annotation.
 
 
 def _module_header():
