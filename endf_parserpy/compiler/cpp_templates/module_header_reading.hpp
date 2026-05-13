@@ -254,7 +254,28 @@ double endfstr2float(const char* str, ParsingOptions &parse_opts) {
   }
   if (j==0) tbuf[j++] = '0';
   tbuf[j++] = '\0';
-  return std::stod(tbuf);
+  // Use std::strtod rather than std::stod because libstdc++'s std::stod throws
+  // std::out_of_range for subnormal underflow (any value below DBL_MIN), even
+  // though such values are representable as denormals. ENDF tape generators
+  // routinely emit very small values like "4.3709-320" in S(alpha,beta) tails.
+  // strtod silently returns the denormal (or 0) on underflow, matching ENDF
+  // convention, while still letting us detect malformed input (no chars
+  // consumed or trailing garbage) and reject overflow/NaN/inf via isfinite.
+  char* end = nullptr;
+  double v = std::strtod(tbuf, &end);
+  if (end == tbuf || *end != '\0') {
+    std::stringstream errmsg;
+    errmsg << "malformed number field: \""
+           << std::string(str, 11) << "\"" << std::endl;
+    throw std::runtime_error(errmsg.str());
+  }
+  if (!std::isfinite(v)) {
+    std::stringstream errmsg;
+    errmsg << "non-finite value (overflow / inf / NaN) in field: \""
+           << std::string(str, 11) << "\"" << std::endl;
+    throw std::runtime_error(errmsg.str());
+  }
+  return v;
 }
 
 

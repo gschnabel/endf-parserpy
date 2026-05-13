@@ -15,6 +15,8 @@
 #include <cassert>
 #include <algorithm>  // for std::sort
 #include <cstddef>
+#include <cstdlib>    // for std::strtod
+#include <cmath>      // for std::isfinite
 
 // When Python merges the various
 // C++ files, there is no need
