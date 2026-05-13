@@ -9,6 +9,7 @@
 #
 ############################################################
 
+
 import os
 import platform
 from copy import copy
@@ -54,8 +55,20 @@ ENDF_PARSER_ARGS = (
 )
 
 
-def add_common_cmd_parser_args(parser):
-    """Add common arguments to command-line argument parser."""
+def add_common_cmd_parser_args(parser, defaults=None):
+    """Add common arguments to command-line argument parser.
+
+    Parameters
+    ----------
+    parser : argparse.ArgumentParser
+        Parser to which the common ENDF parser arguments will be added.
+    defaults : dict, optional
+        Mapping ``{arg_name: default_value}`` overriding the default value of
+        selected arguments for this command. The override is reflected both
+        in the argparse-level default (so the user's CLI flag still wins)
+        and in the rendered ``--help`` text.
+    """
+    defaults = defaults or {}
     parser.add_argument(
         "--no-cpp",
         dest="no_cpp",
@@ -66,11 +79,19 @@ def add_common_cmd_parser_args(parser):
         arg_str, arg_type, arg_const, arg_def, cpp_sup, expose, imp = arg_info
         if not expose:
             continue
+        if arg_str in defaults:
+            arg_def = defaults[arg_str]
+            help_text = (
+                f"Default for this command: {arg_def}. "
+                "Consult the help of the equally named EndfParserPy constructor argument"
+            )
+        else:
+            help_text = "Consult the help of the equally named EndfParserPy constructor argument"
         kwargs = {
             "dest": arg_str,
             "const": arg_const,
             "default": arg_def,
-            "help": "Consult the help of the equally named EndfParserPy constructor argument",
+            "help": help_text,
         }
         if arg_type == bool:
             kwargs["action"] = "store_const"
