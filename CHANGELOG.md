@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1]
+
+### Changed
+
+- C++ extension build time reduced by roughly 5x on multi-core machines (measured: 6:44 → 1:18 on a 4-physical / 8-logical i7-1165G7) by combining three changes: (a) parallel compilation across the six flavor extensions, (b) hash-based deduplication of recipe-derived parse/write functions so identical functions across flavors are now emitted once into a shared translation unit, and (c) splitting that shared translation unit into N pieces so it itself compiles in parallel. Mitigates the long install times observed by downstream CI users (#42)
+- Two new environment variables control the build parallelism: `INSTALL_ENDF_PARSERPY_NUM_BUILD_JOBS` (worker count, default `os.cpu_count()`) and `INSTALL_ENDF_PARSERPY_NUM_SHARED_CHUNKS` (number of shared-TU chunks, default `min(os.cpu_count(), 8)`)
+
+### Fixed
+
+- Docstring of `EndfParserCpp` now documents the `validate_control_records` parameter
+
 ## [0.16.0]
 
 ### Added
