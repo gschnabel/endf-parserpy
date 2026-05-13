@@ -35,7 +35,11 @@ ENDF-6 file with strict validation settings:
        ignore_zero_mismatch=False,
        ignore_varspec_mismatch=False,
        fuzzy_matching=False,
-       accept_spaces=False
+       accept_spaces=False,
+       ignore_blank_lines=False,
+       ignore_send_records=False,
+       ignore_missing_tpid=False,
+       accept_nan_inf=False,
     )
 
     parser.parsefile('input.endf')
@@ -43,6 +47,15 @@ ENDF-6 file with strict validation settings:
 For an explanation of the arguments,
 consult the :ref:`detailed documentation <endf_parser_class>` of
 the EndfParserPy class.
+
+For routine validation from the shell, the ``endf-cli validate``
+subcommand applies the same strict defaults out of the box, so the
+above is equivalent to::
+
+   endf-cli validate input.endf
+
+See :ref:`command_line_interface` for details, including how to
+relax individual flags on the command line.
 
 If the :func:`~endf_parserpy.EndfParserPy.parsefile` method fails,
 it provides detailed output to facilitate locating

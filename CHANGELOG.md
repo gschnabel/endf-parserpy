@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0]
+
+### Added
+
+- ENDF recipe for MF26 (electroatomic interaction data)
+- ENDF recipe for MF28 (atomic relaxation data)
+- ENDF recipe for MF30/MT1 (directory of model-parameter covariances) and MF30/MT2 (covariance matrix)
+- `accept_nan_inf` option on `EndfParserPy` and `EndfParserCpp` (default `True`): allow non-finite floats (`NaN`, `+inf`, `-inf`) in ENDF fields; with `False` such values raise. The writer also gained the ability to emit non-finite floats as the textual tokens `NaN` / `Inf` / `-Inf` right-aligned in the 11-character field
+- Optional `defaults` parameter on `add_common_cmd_parser_args` to override argparse-level defaults for individual subcommands and surface those overrides in `--help`
+
+### Fixed
+
+- C++ parser: number parsing now uses `std::strtod` instead of `std::stod`, which avoids spurious exceptions on subnormal values produced by some evaluations (770 affected files in JEFF-4.0/tsl)
+- C++ parser: `cpp_read_vec` no longer consumes a line when `numel == 0`, fixing 59 spurious SEND-record failures in TENDL-2025/he3 metastables
+- C++ codegen: the `?` (inconsistent variable) marker is now propagated through `:=` placeholder expansions, so recipes like `NX := ...; NX?` are honored under `ignore_varspec_mismatch=True`. This unblocks parsing of JEFF-4.0/n Gd-155, Gd-157 and O-16 with the C++ parser (#53, #55)
+- `endf-cli validate`: strict defaults are now reflected at argparse level and shown in `--help`; an `accept_nan_inf=False` strict default was added so non-finite floats are rejected by default during validation; an override-after-parse code path was retired as redundant (#56)
+- C++ parser: SEND/FEND/MEND/TEND completeness is now checked at EOF. Tapes truncated before MEND/TEND no longer parse silently; this matches the long-standing Python behavior (#57)
+- C++ parser: integer-field parsing is now strict. `std::atoi`-based silent truncation of float-shaped strings (`"0.000000+0" -> 0`, `"4.000000-6" -> 4`, etc.) has been replaced with a `std::strtol`-based path that rejects anything Python's `int()` would reject. A blank field still reads as zero per ENDF convention (#58)
+
+### Changed
+
+- `endf-cli validate` is now strict-by-default across `ignore_number_mismatch`, `ignore_zero_mismatch`, `ignore_varspec_mismatch`, `accept_spaces`, `ignore_blank_lines`, `ignore_send_records`, `ignore_missing_tpid`, and `accept_nan_inf`. Each flag can still be overridden individually on the command line
+- C++ parser is stricter by default in two ways that previously masked malformed files: it now rejects tapes truncated before MEND/TEND, and it now rejects float-shaped strings in integer fields. Both behaviors match the Python parser. Files that relied on the old silent acceptance can opt back in with `ignore_send_records=True` and, for integer fields, must be repaired (no opt-in flag is provided)
+
 ## [0.15.0]
 
 ### Added
