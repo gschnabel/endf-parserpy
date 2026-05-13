@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/05/12
-# Last modified:   2026/01/18
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2024 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -394,7 +394,7 @@ def generate_master_parsefun(name, recipefuns):
     # mend record treatment
     curcond = cpp.logical_and(["after_fend == true", aux.is_mend("parse_opts")])
     curstat = cpp.statement("after_fend = false")
-    curstat = cpp.statement("after_mend = true")
+    curstat += cpp.statement("after_mend = true")
     conditions.append(curcond)
     statements.append(curstat)
     # fend record treatment
@@ -421,6 +421,35 @@ def generate_master_parsefun(name, recipefuns):
     body += cpp.statement("curpos = cont.tellg()", cpp.INDENT)
     body += cpp.statement("is_firstline = false", cpp.INDENT)
     body += cpp.close_block()
+    # Mirror the Python parser's post-loop SEND/FEND/MEND/TEND completeness
+    # check: in strict mode the file must end with a TEND record. Without
+    # this, a tape truncated mid-section silently parses on the C++ side
+    # (issue #57).
+    eof_check = cpp.pureif(
+        "after_mend == true",
+        cpp.throw_runtime_error(
+            "Reached End-Of-File but Tape End (TEND) record missing"
+        ),
+    )
+    eof_check += cpp.pureif(
+        "after_fend == true && after_mend == false",
+        cpp.throw_runtime_error(
+            "Reached End-Of-File but Material End (MEND) "
+            "and Tape End (TEND) records missing"
+        ),
+    )
+    eof_check += cpp.pureif(
+        "after_fend == false && after_mend == false && after_tend == false "
+        "&& section_encountered == true",
+        cpp.throw_runtime_error(
+            "Reached End-Of-File while still in an open MF/MT section; "
+            "Section End records are missing"
+        ),
+    )
+    body += cpp.pureif(
+        "parse_opts.ignore_send_records == false && after_tend == false",
+        eof_check,
+    )
     body += cpp.statement("return mfmt_dict")
 
     args = (
