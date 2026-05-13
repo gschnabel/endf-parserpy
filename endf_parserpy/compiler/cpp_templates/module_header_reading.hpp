@@ -21,6 +21,7 @@ struct ParsingOptions {
   bool ignore_blank_lines;
   bool ignore_send_records;
   bool ignore_missing_tpid;
+  bool accept_nan_inf;
   bool preserve_value_strings;
   bool validate_control_records;
   std::string array_type;
@@ -36,6 +37,7 @@ ParsingOptions default_parsing_options() {
     false,  // ignore_blank_lines
     false,  // ignore_send_records
     false,  // ignore_missing_tpid
+    true,   // accept_nan_inf
     false,  // preserve_value_strings
     false,  // validate_control_records
     "dict"  // array_type
@@ -70,6 +72,8 @@ namespace pybind11 { namespace detail {
           value.ignore_send_records = d["ignore_send_records"].cast<bool>();
         else if (key_str == "ignore_missing_tpid")
           value.ignore_missing_tpid = d["ignore_missing_tpid"].cast<bool>();
+        else if (key_str == "accept_nan_inf")
+          value.accept_nan_inf = d["accept_nan_inf"].cast<bool>();
         else if (key_str == "preserve_value_strings")
           value.preserve_value_strings = d["preserve_value_strings"].cast<bool>();
         else if (key_str == "validate_control_records")
@@ -111,6 +115,10 @@ namespace pybind11 { namespace detail {
         value.ignore_missing_tpid = default_opts.ignore_missing_tpid;
       }
 
+      if (! d.contains("accept_nan_inf")) {
+        value.accept_nan_inf = default_opts.accept_nan_inf;
+      }
+
       if (! d.contains("preserve_value_strings")) {
         value.preserve_value_strings = default_opts.preserve_value_strings;
       }
@@ -136,6 +144,7 @@ namespace pybind11 { namespace detail {
       d["ignore_blank_lines"] = src.ignore_blank_lines;
       d["ignore_send_records"] = src.ignore_send_records;
       d["ignore_missing_tpid"] = src.ignore_missing_tpid;
+      d["accept_nan_inf"] = src.accept_nan_inf;
       d["preserve_value_strings"] = src.preserve_value_strings;
       d["validate_control_records"] = src.validate_control_records;
       d["array_type"] = src.array_type;
@@ -269,10 +278,11 @@ double endfstr2float(const char* str, ParsingOptions &parse_opts) {
            << std::string(str, 11) << "\"" << std::endl;
     throw std::runtime_error(errmsg.str());
   }
-  if (!std::isfinite(v)) {
+  if (!parse_opts.accept_nan_inf && !std::isfinite(v)) {
     std::stringstream errmsg;
     errmsg << "non-finite value (overflow / inf / NaN) in field: \""
-           << std::string(str, 11) << "\"" << std::endl;
+           << std::string(str, 11) << "\". "
+           << "Set `accept_nan_inf=true` to allow non-finite values." << std::endl;
     throw std::runtime_error(errmsg.str());
   }
   return v;

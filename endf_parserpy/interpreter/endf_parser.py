@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2022/05/30
-# Last modified:   2025/07/13
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2022-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2022-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -117,6 +117,7 @@ class EndfParserPy(EndfParserBase):
         ignore_blank_lines=False,
         ignore_send_records=False,
         ignore_missing_tpid=False,
+        accept_nan_inf=True,
         keep_E=False,
         preserve_value_strings=False,
         include_linenum=True,
@@ -189,6 +190,12 @@ class EndfParserPy(EndfParserBase):
         ignore_missing_tpid: bool
             If ``True``, the parser will tolerate a missing TPID
             record at the beginning of the file. *(parsing)*
+        accept_nan_inf: bool
+            If ``True`` (default), allow non-finite numeric values
+            (``NaN``, ``+inf``, ``-inf`` literals as well as values
+            that overflow to ``±inf``) in float fields. If ``False``,
+            such values raise an :class:`InvalidFloatError` during
+            parsing. *(parsing)*
         keep_E : bool
             If ``True``, include the `e` character in scientific notation,
             e.g. `1.23e-8` instead of `1.23-8`. The inclusion establishes
@@ -311,6 +318,7 @@ class EndfParserPy(EndfParserBase):
             "ignore_blank_lines": ignore_blank_lines,
             "ignore_send_records": ignore_send_records,
             "ignore_missing_tpid": ignore_missing_tpid,
+            "accept_nan_inf": accept_nan_inf,
             "width": width,
             "preserve_value_strings": preserve_value_strings,
         }

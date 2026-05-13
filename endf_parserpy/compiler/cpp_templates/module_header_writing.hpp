@@ -272,6 +272,19 @@ std::string float2endfstr(double value, WritingOptions &write_opts) {
   std::ostringstream oss;
   std::string numstr;
   int width = 11;
+  // Non-finite values (NaN, +/-inf) cannot be represented in the standard
+  // ENDF compact float format. Emit a textual right-aligned representation
+  // that strtod can read back; this matches the convention seen in real
+  // evaluations (e.g. TENDL-2025/he3/he3_026-Fe-52M_2620.dat) that store
+  // "NaN" verbatim in the 11-char field.
+  if (! std::isfinite(value)) {
+    std::string repr;
+    if (std::isnan(value)) repr = "NaN";
+    else if (value > 0) repr = "Inf";
+    else repr = "-Inf";
+    oss << std::right << std::setw(width) << repr;
+    return oss.str();
+  }
   int effwidth = width;
   if (! write_opts.keep_E) {
       effwidth++;

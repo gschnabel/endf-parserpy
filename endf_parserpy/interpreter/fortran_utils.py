@@ -3,14 +3,14 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2022/05/30
-# Last modified:   2025/07/08
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2022-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2022-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
 from .custom_exceptions import InvalidIntegerError, InvalidFloatError
-from math import log10, floor
+from math import log10, floor, isfinite
 from copy import deepcopy
 from ..utils.math_utils import EndfFloat
 
@@ -55,6 +55,7 @@ def fortstr2float(valstr, read_opts=None):
         read_opts = {}
     accept_spaces = read_opts.get("accept_spaces", True)
     preserve_value_strings = read_opts.get("preserve_value_strings", False)
+    accept_nan_inf = read_opts.get("accept_nan_inf", True)
     width = read_opts.get("width", None)
     if width is not None:
         valstr = valstr[:width]
@@ -67,12 +68,17 @@ def fortstr2float(valstr, read_opts=None):
             if valstr[i - 1].isdigit():
                 valstr = valstr[:i] + "E" + valstr[i:]
     try:
-        if preserve_value_strings:
-            return EndfFloat(valstr, orig_valstr)
-        else:
-            return float(valstr)
+        val = float(valstr)
     except ValueError as valerr:
         raise InvalidFloatError(valerr)
+    if not accept_nan_inf and not isfinite(val):
+        raise InvalidFloatError(
+            f"non-finite value (overflow / inf / NaN) in field: '{orig_valstr}'. "
+            f"Set `accept_nan_inf=True` to allow non-finite values."
+        )
+    if preserve_value_strings:
+        return EndfFloat(valstr, orig_valstr)
+    return val
 
 
 def float2basicnumstr(val, write_opts=None):
@@ -204,6 +210,20 @@ def float2fortstr(val, write_opts=None):
                 f"'{orig_str}' incompatible with specified width={width}"
             )
         return orig_str
+    # Non-finite values (NaN, +/-inf) cannot be represented in the standard
+    # ENDF compact float format. Emit a textual right-aligned representation
+    # that fortstr2float can read back; matches the convention seen in some
+    # real evaluations that store "NaN" verbatim in the 11-char field.
+    if not isfinite(val):
+        from math import isnan
+
+        if isnan(val):
+            repr_str = "NaN"
+        elif val > 0:
+            repr_str = "Inf"
+        else:
+            repr_str = "-Inf"
+        return repr_str.rjust(width)
     prefer_noexp = write_opts.get("prefer_noexp", False)
     valstr_exp = float2expformstr(val, write_opts=write_opts)
     if not prefer_noexp:

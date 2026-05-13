@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2025/06/06
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2024-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -40,6 +40,7 @@ ENDF_PARSER_ARGS = (
     ("ignore_blank_lines", bool, True, None, True, True, True),
     ("ignore_send_records", bool, True, None, True, True, True),
     ("ignore_missing_tpid", bool, True, None, True, True, True),
+    ("accept_nan_inf", bool, True, None, True, True, True),
     ("print_cache_info", bool, True, False, False, True, False),
     ("endf_format", str, None, None, True, True, True),
     ("loglevel", int, None, None, False, True, True),

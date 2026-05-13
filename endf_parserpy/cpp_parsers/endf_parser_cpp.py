@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/05/29
-# Last modified:   2025/07/08
+# Last modified:   2026/05/13
 # License:         MIT
-# Copyright (c) 2024-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -49,6 +49,7 @@ class EndfParserCpp(EndfParserBase):
         ignore_blank_lines=False,
         ignore_send_records=False,
         ignore_missing_tpid=False,
+        accept_nan_inf=True,
         validate_control_records=False,
         abuse_signpos=False,
         keep_E=False,
@@ -101,6 +102,13 @@ class EndfParserCpp(EndfParserBase):
         ignore_missing_tpid: bool
             If ``True``, the parser will tolerate a missing TPID
             record at the beginning of the file. *(parsing)*
+        accept_nan_inf: bool
+            If ``True`` (default), allow non-finite numeric values
+            (``NaN``, ``+inf``, ``-inf`` literals as well as values
+            that overflow to ``±inf``) in float fields. If ``False``,
+            such values raise an error during parsing. The default
+            preserves backward compatibility with the pure-Python
+            parser, which has always accepted them. *(parsing)*
         abuse_signpos: bool
             Permit positive numbers to start in the first character slot
             of an ENDF-6 field, which is usually reserved for the sign,
@@ -150,6 +158,7 @@ class EndfParserCpp(EndfParserBase):
             "ignore_blank_lines": ignore_blank_lines,
             "ignore_send_records": ignore_send_records,
             "ignore_missing_tpid": ignore_missing_tpid,
+            "accept_nan_inf": accept_nan_inf,
             "preserve_value_strings": preserve_value_strings,
             "validate_control_records": validate_control_records,
             "array_type": array_type,
