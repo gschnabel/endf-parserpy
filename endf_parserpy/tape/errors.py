@@ -11,8 +11,10 @@
 
 """Exceptions raised by the multi-material tape interface."""
 
+from ..errors import EndfParserpyError
 
-class TapeError(Exception):
+
+class TapeError(EndfParserpyError):
     """Base class for all errors raised by the tape interface."""
 
 
@@ -25,12 +27,16 @@ class TapeStructureError(TapeError):
     """
 
 
-class AmbiguousMaterialError(TapeError):
+class AmbiguousMaterialError(TapeError, LookupError):
     """Raised when a MAT number matches several materials.
 
     PENDF/GENDF tapes repeat the same MAT number at different
     temperatures. A lookup by MAT number then needs an ``occurrence``
     index to select among them.
+
+    This is a lookup failure, so it also derives from the built-in
+    :class:`LookupError`; code that handles lookup errors generically
+    can catch it that way.
     """
 
 

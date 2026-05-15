@@ -23,6 +23,7 @@ from .utils.user_tools import (
 )
 from .utils.endf6_plumbing import update_directory
 from .utils.math_utils import EndfFloat
+from .errors import EndfParserpyError
 from .tape import (
     parse_tape,
     iter_parse_tape,
@@ -52,6 +53,8 @@ __all__ = (
     "list_parsed_sections",
     "list_unparsed_sections",
     "sanitize_fieldname_types",
+    # package-wide base exception
+    "EndfParserpyError",
     # multi-material tape interface
     "parse_tape",
     "iter_parse_tape",
