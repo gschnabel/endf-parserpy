@@ -26,6 +26,7 @@ from .operations import (
     FailedMaterial,
 )
 from .index import TapeIndex, MaterialIndexEntry, SectionIndexEntry
+from .address import EndfMaterialPath
 from .material import MaterialView
 from .endf_file import EndfFile, FailedSection
 
@@ -39,6 +40,7 @@ __all__ = (
     "MaterialIndexEntry",
     "SectionIndexEntry",
     "EndfFile",
+    "EndfMaterialPath",
     "MaterialView",
     "FailedSection",
     "TapeError",

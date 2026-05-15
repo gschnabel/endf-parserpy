@@ -24,6 +24,12 @@ import threading
 from collections.abc import Mapping
 
 from ..endf_parser_factory import EndfParserFactory
+from .address import (
+    EndfMaterialPath,
+    parse_section_path,
+    section_has,
+    walk_section,
+)
 from .cache import _RawCache, _SectionCache, _Section
 from .errors import AmbiguousMaterialError, SectionParseError, StaleSourceError
 from .index import TapeIndex
@@ -34,10 +40,19 @@ _VALID_MODES = ("index", "load_raw", "parse_all")
 _VALID_ON_ERROR = ("raise", "mark")
 _BACKEND_OF = {"EndfParserCpp": "cpp", "EndfParserPy": "python"}
 
+# sentinel distinguishing "no value given" from an explicit value of None
+_UNSET = object()
+
 
 def _control_line(mat, mf, mt):
     """Build a control-only ENDF record (used for FEND/MEND/TEND)."""
     return " " * 66 + f"{mat:>4}{mf:>2}{mt:>3}"
+
+
+def _value_match(field, value, tol):
+    if tol and isinstance(field, (int, float)) and isinstance(value, (int, float)):
+        return abs(field - value) <= tol
+    return field == value
 
 
 class FailedSection:
@@ -135,6 +150,7 @@ class EndfFile:
         self._raw_cache = _RawCache(raw_cache_bytes)
         self._section_cache = _SectionCache(parsed_cache_bytes)
         self._material_views = {}
+        self._secondary_indexes = {}
         self._lock = threading.RLock()
         if mode == "load_raw":
             self._preload(parse=False)
@@ -201,13 +217,114 @@ class EndfFile:
         return [self[p] for p in self._index.by_za(za)]
 
     def find(self, *, mat=None, za=None):
-        """Return a list of materials matching every given criterion."""
+        """Return a list of materials matching every given criterion.
+
+        This is the structural lookup: it uses only the index. For
+        lookups by a parsed section field, see :meth:`query`.
+        """
         positions = set(range(len(self._index)))
         if mat is not None:
             positions &= set(self._index.by_mat(mat))
         if za is not None:
             positions &= set(self._index.by_za(za))
         return [self[p] for p in sorted(positions)]
+
+    # -- path-based queries --------------------------------------------
+
+    def get(self, path):
+        """Return the value addressed by an :class:`EndfMaterialPath`.
+
+        ``path`` is an :class:`EndfMaterialPath` or a string of the form
+        ``material/MF/MT[/field...]``. The single section it refers to
+        is parsed lazily and cached. If that section cannot be parsed a
+        :class:`SectionParseError` is raised regardless of ``on_error``.
+        """
+        mp = path if isinstance(path, EndfMaterialPath) else EndfMaterialPath(path)
+        if mp.mf is None or mp.mt is None:
+            raise ValueError(f"{mp!r} must address at least a section (material/MF/MT)")
+        position = mp.resolve_material(self._index)
+        section = self._get_section(position, mp.mf, mp.mt)
+        if isinstance(section, FailedSection):
+            raise SectionParseError(
+                f"cannot resolve {mp!r}: MF={mp.mf}/MT={mp.mt} of the "
+                f"material at position {position} failed to parse"
+            ) from section.exception
+        return walk_section(section, mp.subpath)
+
+    def build_index(self, section_path, *, name=None):
+        """Build a secondary index over a section field.
+
+        Parses the ``MF/MT`` section of every material that has it,
+        reads the value at the field path and returns a dict
+        ``{value: [positions]}``. This parses one section per material,
+        so the cost grows with the number of materials. With ``name``
+        the result is also stored and reachable via
+        :attr:`secondary_indexes`.
+        """
+        mf, mt, subpath = parse_section_path(section_path)
+        mapping = {}
+        for position in range(len(self._index)):
+            if (mf, mt) not in self._index[position].sections:
+                continue
+            section = self._get_section(position, mf, mt)
+            if isinstance(section, FailedSection):
+                if self._on_error == "raise":
+                    raise SectionParseError(
+                        f"MF={mf}/MT={mt} of the material at position "
+                        f"{position} failed to parse"
+                    ) from section.exception
+                continue
+            if not section_has(section, subpath):
+                continue
+            value = walk_section(section, subpath)
+            try:
+                mapping.setdefault(value, []).append(position)
+            except TypeError:
+                raise ValueError(
+                    f"section path {section_path!r} resolves to a "
+                    "non-hashable value; build_index needs a scalar field"
+                ) from None
+        if name is not None:
+            self._secondary_indexes[name] = mapping
+        return mapping
+
+    def query(self, section_path, value=_UNSET, *, predicate=None, tol=0.0):
+        """Return the materials whose section field matches.
+
+        Pass exactly one of ``value`` (equality, within ``tol`` for
+        numbers) or ``predicate`` (a callable applied to the field).
+        Returns a list of :class:`MaterialView`.
+        """
+        if (value is _UNSET) == (predicate is None):
+            raise ValueError("pass exactly one of value or predicate")
+        mf, mt, subpath = parse_section_path(section_path)
+        matches = []
+        for position in range(len(self._index)):
+            if (mf, mt) not in self._index[position].sections:
+                continue
+            section = self._get_section(position, mf, mt)
+            if isinstance(section, FailedSection):
+                if self._on_error == "raise":
+                    raise SectionParseError(
+                        f"MF={mf}/MT={mt} of the material at position "
+                        f"{position} failed to parse"
+                    ) from section.exception
+                continue
+            if not section_has(section, subpath):
+                continue
+            field = walk_section(section, subpath)
+            if predicate is not None:
+                matched = bool(predicate(field))
+            else:
+                matched = _value_match(field, value, tol)
+            if matched:
+                matches.append(self[position])
+        return matches
+
+    @property
+    def secondary_indexes(self):
+        """The named secondary indexes built by :meth:`build_index`."""
+        return self._secondary_indexes
 
     # -- the lazy access path ------------------------------------------
 
@@ -354,4 +471,5 @@ class EndfFile:
         self._raw_cache = _RawCache(state["raw_cache_bytes"])
         self._section_cache = _SectionCache(state["parsed_cache_bytes"])
         self._material_views = {}
+        self._secondary_indexes = {}
         self._lock = threading.RLock()

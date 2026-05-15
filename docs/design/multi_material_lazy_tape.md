@@ -1,6 +1,6 @@
 # Implementation Plan — Multi-Material Tapes & Lazy Indexed Access
 
-Status: **Phases 1–3 implemented; Phases 4–5 pending**
+Status: **Phases 1–4 implemented; Phase 5 pending**
 Branch: `feature/multi-material-lazy-tape`
 Target version: additive feature, no change to existing API.
 
@@ -210,28 +210,36 @@ Deliverable: `tests/test_endf_file_lazy.py` (18 tests, Python and C++ backends)
 identity, the preload modes, secondary lookups, the `on_error` policy,
 `verify_source` staleness detection and a pickle round-trip. **Done.**
 
-### Phase 4 — `EndfMaterialPath` query layer  *(≈3 days)*
+### Phase 4 — `EndfMaterialPath` query layer  *(≈3 days)* — ✅ implemented
 
 Goal: semantic lookup decoupled from the engine.
 
 * `EndfMaterialPath` (`address.py`) = a material selector + an unchanged
   `EndfPath`. `address.py` resolves `MAT`/`MAT#k`/`#k` against a `TapeIndex`
   → position. The structural prefix (`material/MF/MT`) is resolved by the
-  index; the remaining suffix is walked on the recipe-parsed dict. `EndfPath`
-  itself is not modified (D13).
-* `tape.get(path)` — parses exactly one section (cached in Tier 2).
-* `tape.build_index(path, *, name=None)` — **explicit, opt-in**; parses the
-  prefix section of every material to build a secondary `{value -> [positions]}`
-  map. Cost (1 section × N materials) is documented at the call site.
-* `tape.find(path, predicate)` / `find(**{path: value})`; float comparisons
-  (e.g. temperature) take a tolerance. Failed sections honour `on_error`.
+  index; the remaining suffix is walked on the recipe-parsed section with
+  `EndfPath`'s own `get`/`exists`. `EndfPath` itself is not modified (D13).
+* `EndfFile.get(path)` — `path` is an `EndfMaterialPath` (`material/MF/MT/...`);
+  parses exactly that one section (cached in Tier 2) and returns the value.
+  A section that fails to parse raises `SectionParseError` regardless of
+  `on_error` — `get` is a point lookup, so failure is an error.
+* `EndfFile.build_index(section_path, *, name=None)` — **explicit, opt-in**;
+  takes a section-relative path (`MF/MT/...`, no material selector — it spans
+  all materials), parses that section of every material and builds a secondary
+  `{value -> [positions]}` map. Cost (1 section × N materials) documented.
+* `EndfFile.query(section_path, value=…, *, predicate=…, tol=…)` — value or
+  predicate match; numeric comparison takes a tolerance. Returns a list of
+  `MaterialView`. Named `query` rather than the draft's `find` to avoid
+  colliding with the Phase-3 structural `find(*, mat=, za=)`; `build_index` and
+  `query` honour `on_error` (a failed section is skipped under `"mark"`).
 * A curated set of common paths (`TEMP_ENDF`, `TEMP_PENDF`, …), so casual users
   need not know exact paths, is **deferred to a follow-up** — it would live in
   an isolated, opt-in `endf_parserpy/tape/common_paths.py`; semantic knowledge
   stays out of the engine.
 
-Deliverable: `tests/test_tape_query.py` — temperature disambiguation on a
-multi-temperature PENDF fixture.
+Deliverable: `tests/test_tape_query.py` (15 tests, Python and C++ backends) —
+`EndfMaterialPath` parsing/resolution, `get`, ambiguity handling,
+`build_index`, and `query` by value/predicate/tolerance. **Done.**
 
 ### Phase 5 — In-memory structural editing & write-back  *(≈1 week)*
 
