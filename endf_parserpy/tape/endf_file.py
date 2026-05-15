@@ -27,6 +27,7 @@ so an unedited round trip is byte-exact.
 
 import os
 import threading
+from contextlib import contextmanager
 from collections.abc import Mapping
 
 from ..endf_parser_factory import EndfParserFactory
@@ -198,18 +199,22 @@ class EndfFile:
         self._material_views = {}
         self._secondary_indexes = {}
         self._lock = threading.RLock()
+        self._read_fh = None
         if mode == "load_raw":
             self._preload(parse=False)
         elif mode == "parse_all":
             self._preload(parse=True)
 
     def _preload(self, parse):
-        for entry in self._index:
-            for mf, mt in list(entry.sections):
-                if parse:
-                    self._get_section(entry.position, mf, mt)
-                else:
-                    self._get_raw(entry.position, mf, mt, entry.sections[(mf, mt)])
+        # a whole-tape operation: read every section through a single
+        # held file handle instead of reopening the file per section
+        with self._read_session():
+            for entry in self._index:
+                for mf, mt in list(entry.sections):
+                    if parse:
+                        self._get_section(entry.position, mf, mt)
+                    else:
+                        self._get_raw(entry.position, mf, mt, entry.sections[(mf, mt)])
 
     # -- mapping protocol over materials -------------------------------
 
@@ -530,10 +535,32 @@ class EndfFile:
             return _Section(section)
         return section  # a section without a recipe stays a list of strings
 
+    @contextmanager
+    def _read_session(self):
+        """Hold one file handle open for the duration of the block.
+
+        Disk reads performed inside the block reuse a single handle
+        instead of reopening the file per section. Used for whole-tape
+        operations; outside such a block every read opens and closes the
+        file on its own, which keeps interactive use simple and never
+        pins the file open.
+        """
+        with open(self._path, "rb") as fh:
+            self._read_fh = fh
+            try:
+                yield
+            finally:
+                self._read_fh = None
+
     def _read_span(self, offset, length):
         if self._verify_source:
             self._check_source()
-        with open(self._path, "rb") as fh:
+        fh = self._read_fh
+        if fh is None:
+            with open(self._path, "rb") as fh:
+                fh.seek(offset)
+                data = fh.read(length)
+        else:
             fh.seek(offset)
             data = fh.read(length)
         return data.decode("latin-1").splitlines()
@@ -672,3 +699,4 @@ class EndfFile:
         self._material_views = {}
         self._secondary_indexes = {}
         self._lock = threading.RLock()
+        self._read_fh = None
