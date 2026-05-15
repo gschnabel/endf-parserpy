@@ -35,11 +35,12 @@ These were agreed during design review and are treated as fixed inputs:
 | D5 | Lazy access uses a **3-tier model**: index (always resident) / raw section text (evictable, re-read from disk) / parsed section (evictable, re-derived from raw). |
 | D6 | Tier-2 (parsed) cache: clean entries are LRU-evictable, **weighted by raw-text byte size**; dirty entries are pinned; eviction skips entries still referenced externally (weakref guard). |
 | D7 | The structural index is **recipe-free**. It reads only structural fields (MAT/MF/MT control fields, HEAD-record `C1=ZA`/`C2=AWR`, byte spans). Semantic fields (e.g. temperature) are resolved lazily via the recipe. |
-| D8 | Semantic lookup is generalised: a caller supplies an extended `EndfPath`; the engine parses only the section the path's structural prefix identifies. |
+| D8 | Semantic lookup is generalised: a caller supplies an `EndfMaterialPath`; the engine parses only the section the path's structural prefix identifies. |
 | D9 | **Full in-memory structural editing** (add/delete/reorder materials and sections) is in scope for v1. |
 | D10 | `on_error` policy collapses to two values: `raise` and `mark`. `skip` is `mark` + an iteration filter. Default for tapes: `mark`. |
 | D11 | Byte-exact round-trip is guaranteed for **raw-kept MT sections only**; parsed sections are re-rendered canonically. Line endings normalised to **LF**; inter-material blank lines not preserved. |
-| D12 | Entry point: a new `EndfTape` class constructed directly (not via `EndfParserFactory`). It *accepts* a factory-made parser as an injected engine. |
+| D12 | Entry point: a new `EndfFile` class constructed directly (not via `EndfParserFactory`). It *accepts* a factory-made parser as an injected engine. |
+| D13 | `EndfPath` is **not modified**. Today its first component is MF; making it a material would silently break every existing caller. Instead a new `EndfMaterialPath` type = optional material selector + an unchanged `EndfPath`. The two have separate, self-contained grammars: within an `EndfMaterialPath` component 1 is always the material; an `EndfPath` keeps meaning MF/MT/… exactly as before. No backward-compatibility break. |
 
 ---
 
@@ -47,7 +48,7 @@ These were agreed during design review and are treated as fixed inputs:
 
 ```
             ┌─────────────────────────────────────────────┐
-            │  EndfTape  (new, stateful, file-bound)       │  lazy/cache/query/edit
+            │  EndfFile  (new, stateful, file-bound)       │  lazy/cache/query/edit
             └───────────────┬─────────────────┬───────────┘
                             │ uses            │ uses
             ┌───────────────▼──────┐   ┌──────▼─────────────────┐
@@ -62,7 +63,7 @@ These were agreed during design review and are treated as fixed inputs:
 ```
 
 **Dependency rule (hard invariant):** the splitter/indexer depend on *nothing*
-recipe-related. The recipe layer depends on structural. `EndfTape` depends on
+recipe-related. The recipe layer depends on structural. `EndfFile` depends on
 both. The arrow never points upward — the index must never import a recipe.
 
 ---
@@ -73,21 +74,24 @@ both. The arrow never points upward — the index must never import a recipe.
 
 | File | Contents |
 |------|----------|
-| `tape/__init__.py` | public exports: `EndfTape`, `parse_tape`, `write_tape`, `iter_parse_tape` |
+| `tape/__init__.py` | public exports: `EndfFile`, `parse_tape`, `write_tape`, `iter_parse_tape` |
 | `tape/splitter.py` | `split_materials(lines)` — lexical tape → per-material chunks |
 | `tape/index.py` | `TapeIndex`, `MaterialIndexEntry`, `SectionIndexEntry`; the structural scanner |
 | `tape/cache.py` | `_WeightedSectionCache` (clean LRU + weakref guard), dirty store |
 | `tape/material.py` | `MaterialView`, `_MaterialSections` (MutableMapping for structural-edit detection) |
-| `tape/endf_tape.py` | `EndfTape` — lifecycle, lazy access, query, editing, write |
-| `tape/address.py` | extended-address parsing (`MAT`, `MAT#k`, `#k`) → resolution against index |
+| `tape/endf_file.py` | `EndfFile` — lifecycle, lazy access, query, editing, write |
+| `tape/address.py` | `EndfMaterialPath` (material selector + an unchanged `EndfPath`); parses `MAT` / `MAT#k` / `#k` and resolves it against a `TapeIndex` → position |
 | `tape/errors.py` | `AmbiguousMaterialError`, `SectionParseError`, `TapeStructureError`, `StaleSourceError` |
 
 ### Functions added to existing public surface
 
 | File | Addition |
 |------|----------|
-| `endf_parserpy/__init__.py` | re-export `EndfTape`, `parse_tape`, `write_tape`, `iter_parse_tape` |
-| `endf_parserpy/utils/accessories.py` | extend `EndfPath` to accept an optional leading material component with `#k` |
+| `endf_parserpy/__init__.py` | re-export `EndfFile`, `EndfMaterialPath`, `parse_tape`, `write_tape`, `iter_parse_tape` |
+
+`endf_parserpy/utils/accessories.py` (`EndfPath`) is **not touched** — see D13.
+`EndfMaterialPath` is a new, separate type that *composes* an `EndfPath`, so
+existing `EndfPath` behaviour and grammar are unchanged.
 
 ### Minimal changes to existing files (additive, behaviour-preserving)
 
@@ -126,7 +130,7 @@ Goal: parse and write tapes with N materials, fully eager, no index/cache.
   emits the TPID once, each material body + its MEND, one final TEND — using the
   new `include_tpid`/`include_tend` kwargs on the engine's `write()`.
 * `include`/`exclude` accept today's MF / `(MF,MT)` tuples (apply to *all*
-  materials) **and** extended-address strings (`"9225#1/3"`) to scope per
+  materials) **and** `EndfMaterialPath` strings (`"9225#1/3"`) to scope per
   material. Tuple ambiguity (is `(9225,3)` MAT/MF or MF/MT?) is avoided by
   keeping tuples MAT-less and using the path string form for MAT scoping.
 * `on_error`: `raise` aborts; `mark` keeps the failed material as a
@@ -153,11 +157,11 @@ Goal: scan a tape into a recipe-free index without parsing section bodies.
 Deliverable: `tests/test_tape_index.py` — index vs. known fixtures, PENDF tape
 with repeated MAT.
 
-### Phase 3 — `EndfTape` lazy access + 3-tier cache  *(≈1 week)*
+### Phase 3 — `EndfFile` lazy access + 3-tier cache  *(≈1 week)*
 
 Goal: the stateful lazy class.
 
-* `EndfTape(filename, *, parser=None, mode="index", parsed_cache_bytes=64<<20,
+* `EndfFile(filename, *, parser=None, mode="index", parsed_cache_bytes=64<<20,
   raw_cache_bytes=64<<20, on_error="mark", verify_source=False)`.
   `parser` defaults to `EndfParserFactory.create(select="fastest")`.
   `mode` ∈ `{"index", "load_raw", "parse_all"}`.
@@ -170,9 +174,9 @@ Goal: the stateful lazy class.
   than the budget is admitted alone (with a warning).
 * File access: **open/seek/read-span/close per section read** — no shared file
   handle, no shared seek position. A single coarse `threading.Lock` guards the
-  cache mutation, making a shared `EndfTape` thread-safe (serialised).
+  cache mutation, making a shared `EndfFile` thread-safe (serialised).
 * Picklability: `__getstate__` drops the lock and any handle, keeps
-  path + config + index; `__setstate__` rebuilds. Lets an `EndfTape` (with its
+  path + config + index; `__setstate__` rebuilds. Lets an `EndfFile` (with its
   pre-built index) be sent to `ProcessPoolExecutor` workers.
 * Convenience: `by_mat(mat, *, occurrence=None)` (raises `AmbiguousMaterialError`
   listing positions if needed), `by_nuclide(za)`, `find(...) -> list`,
@@ -180,25 +184,28 @@ Goal: the stateful lazy class.
 * `__enter__`/`__exit__`; `unload(address=None)`; `repr` shows MAT + nuclide
   labels per position.
 
-Deliverable: `tests/test_endf_tape_lazy.py` — lazy access, eviction under a
+Deliverable: `tests/test_endf_file_lazy.py` — lazy access, eviction under a
 tight budget, weakref-pinned identity, pickling round-trip.
 
-### Phase 4 — `EndfPath` query layer  *(≈3 days)*
+### Phase 4 — `EndfMaterialPath` query layer  *(≈3 days)*
 
 Goal: semantic lookup decoupled from the engine.
 
-* Extend `EndfPath` with the leading material component (`address.py` resolves
-  `MAT`/`MAT#k`/`#k` against a `TapeIndex` → position). Structural prefix
-  (`material/MF/MT`) resolved by the index; suffix walked on the parsed dict.
+* `EndfMaterialPath` (`address.py`) = a material selector + an unchanged
+  `EndfPath`. `address.py` resolves `MAT`/`MAT#k`/`#k` against a `TapeIndex`
+  → position. The structural prefix (`material/MF/MT`) is resolved by the
+  index; the remaining suffix is walked on the recipe-parsed dict. `EndfPath`
+  itself is not modified (D13).
 * `tape.get(path)` — parses exactly one section (cached in Tier 2).
 * `tape.build_index(path, *, name=None)` — **explicit, opt-in**; parses the
   prefix section of every material to build a secondary `{value -> [positions]}`
   map. Cost (1 section × N materials) is documented at the call site.
 * `tape.find(path, predicate)` / `find(**{path: value})`; float comparisons
   (e.g. temperature) take a tolerance. Failed sections honour `on_error`.
-* Optional batteries: `endf_parserpy/tape/common_paths.py` — a small, isolated,
-  opt-in module of curated paths (`TEMP_ENDF`, `TEMP_PENDF`, …). Semantic
-  knowledge lives here, never in the engine.
+* A curated set of common paths (`TEMP_ENDF`, `TEMP_PENDF`, …), so casual users
+  need not know exact paths, is **deferred to a follow-up** — it would live in
+  an isolated, opt-in `endf_parserpy/tape/common_paths.py`; semantic knowledge
+  stays out of the engine.
 
 Deliverable: `tests/test_tape_query.py` — temperature disambiguation on a
 multi-temperature PENDF fixture.
@@ -286,7 +293,7 @@ save, directory regeneration, mixed dirty/clean round-trip.
 | Mini-tape per-section overhead negates C++ speed | Phase-7 benchmark; measure-then-decide |
 | Parsed-memory cap is only a proxy (raw-byte weight) | documented as a tuning knob, not an RSS guarantee; per-MF calibration is a possible v2 refinement |
 | Stale `NC` in MF1/MT451 directory after edits | regenerate directory for any material with modified sections |
-| Source file changed under a long-lived `EndfTape` | opt-in `verify_source` re-stats `(size,mtime)`; raises `StaleSourceError` |
+| Source file changed under a long-lived `EndfFile` | opt-in `verify_source` re-stats `(size,mtime)`; raises `StaleSourceError` |
 
 ---
 
@@ -296,8 +303,8 @@ save, directory regeneration, mixed dirty/clean round-trip.
 |-------|----------|
 | 1 — eager multi-material | ~3 days |
 | 2 — structural index | ~2 days |
-| 3 — lazy `EndfTape` + cache | ~1 week |
-| 4 — `EndfPath` query layer | ~3 days |
+| 3 — lazy `EndfFile` + cache | ~1 week |
+| 4 — `EndfMaterialPath` query layer | ~3 days |
 | 5 — structural editing + write-back | ~1 week |
 | docs, examples, CI polish | ~3 days |
 | **Total** | **~4–5 weeks** |
@@ -308,10 +315,40 @@ near zero throughout.
 
 ---
 
-## 11. Open items for reviewer
+## 11. Resolved review items
 
-1. Module location: `endf_parserpy/tape/` (assumed here) vs. another name.
-2. Should `iter_parse_tape` yield `(MaterialView, errors)` or bare dicts in
-   Phase 1 (before `EndfTape` exists)? Currently: bare dicts + `FailedMaterial`.
-3. Public name: `EndfTape` vs. `EndfFile` vs. `EndfMaterialTape`.
-4. Whether `common_paths.py` ships in v1 or is deferred to a follow-up.
+All open items from the design review are settled:
+
+1. Module location → `endf_parserpy/tape/`.
+2. `iter_parse_tape` yields **bare dicts** (and a `FailedMaterial` object for
+   failures), mirroring the existing `parse`/`parsefile` return semantics.
+3. Public class name → **`EndfFile`** (no legacy "tape" jargon in the user-
+   facing class; the `tape/` module keeps the term internally).
+4. Path type → **`EndfMaterialPath`**, a new type composing an unchanged
+   `EndfPath` (D13).
+5. `common_paths.py` → **deferred** to a follow-up.
+
+---
+
+## 12. Future direction (non-goal for v1)
+
+A natural next layer is a cross-file aggregator — provisionally **`EndfLibrary`**
+— presenting many ENDF files (single- or multi-material) under one addressable,
+editable namespace, abstracting away file boundaries. It is the same
+compositional pattern applied one level up:
+`EndfLibrary` → `EndfFile` → `MaterialView` → `(MF,MT)` section.
+
+This is **explicitly out of scope for v1**, but the v1 design must not preclude
+it — and does not:
+
+* `EndfMaterialPath` would gain an optional leading *file / library-member*
+  component; the `MAT` / `#k` grammar is unaffected.
+* `EndfFile` stays a self-contained unit the aggregator simply composes, exactly
+  as `EndfFile` composes per-material units.
+* The index/cache machinery generalises — a library index is a union of
+  per-file indexes plus a file dimension.
+
+The name `EndfTape` is deliberately **not** used for this aggregator: in ENDF
+terminology a *tape* is canonically a single file (the unit ended by TEND), so
+`EndfTape` would be both inaccurate for a cross-file object and a reintroduction
+of the jargon dropped from `EndfFile`.
