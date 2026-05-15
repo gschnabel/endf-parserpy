@@ -13,9 +13,9 @@ format.
 
 In this tutorial, we take the *European Activation File 2007* (EAF-2007)
 as an example of nuclear data stored in a legacy format and demonstrate
-how it can be parsed with ``endf-parserpy``. Noteworthy, we will also
-explain how one can work around the limitation of endf-parserpy not
-supporting several materials in a single file.
+how it can be parsed with ``endf-parserpy``. Noteworthy, the EAF-2007
+file also contains several materials, and we explain one way of
+dealing with that.
 
 The format underlying EAF-2007 is described in `this document
 <https://www.oecd-nea.org/dbdata/data/manual-endf/EAF-format(Based_on_UKAEA-FUS-535).pdf>`_.
@@ -101,6 +101,15 @@ kind of section end record. Technically, these records are filtered out by
 only dealing with records that contain a material number (``MAT``)
 greater than zero.
 
+.. note::
+
+   For files that follow the standard ENDF-6 structure, the
+   :func:`~endf_parserpy.parse_tape` function performs this splitting
+   and parsing automatically; see the guide on
+   :doc:`multi-material files <multimaterial_files>`. The manual
+   approach shown here remains useful when, as for EAF-2007, a custom
+   recipe and relaxed record handling are required.
+
 Finally, we can loop over the materials stored in ``mat_dict`` under
 keys given by the material number and individually parse the list
 of strings associated with each material.
@@ -125,8 +134,8 @@ of material ``102``, run the following code:
 
 In summary, this tutorial showed how to parse a nuclear data file (EAF-2007)
 given in a legacy format by creating a custom ENDF recipe definition.
-It was also demonstrated how to work around the limitation of
-``endf-parserpy`` not supporting several materials in a single file.
+It was also demonstrated how to deal with a file that contains
+several materials.
 Finally, below we provide the full code example including all code snippets
 explained step-by-step in this tutorial:
 

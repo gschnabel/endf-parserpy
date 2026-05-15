@@ -61,10 +61,12 @@ Plotting point-wise cross sections
 We provide example code that demonstrates
 how point-wise cross sections can be plotted from a
 PENDF file using the `matplotlib <https://matplotlib.org/>`_
-Python package. Please note that for the time being only a single
-material section in a PENDF file is supported. For inspiration how
-to work around this limitation, consider the practical solution
-explained in the :ref:`guide on working with legacy formats <working_with_legacy_formats_sec>`.
+Python package. If your PENDF file contains data at several
+temperatures, each temperature appears as a separate material
+on the tape; the guide on
+:doc:`multi-material files <multimaterial_files>` explains how
+to read and select among them. The example below assumes a
+single material.
 
 Plotting the total cross sections can be achieved by this code snippet:
 

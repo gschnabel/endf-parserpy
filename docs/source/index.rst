@@ -16,6 +16,7 @@
    guide/python_and_cpp_parser
    guide/command_line_interface
    guide/reading_writing_endf
+   guide/multimaterial_files
    guide/endf_format_validation
    guide/comparing_endf_files
    guide/format_translation
@@ -56,6 +57,7 @@ perform various actions on ENDF files, such as:
 - Perform format validation
 - Convert from and to other file formats, such as JSON
 - Merge data from various ENDF-6 files into a single one
+- Read and write files that bundle several materials
 - Compare ENDF-6 files with meaningful reporting on differences
 - Construct ENDF-6 files from scratch
 
@@ -68,8 +70,9 @@ of the major nuclear data libraries, such as
 `ENDF/B <https://www.nndc.bnl.gov/endf/>`_,
 `JEFF <https://www.oecd-nea.org/dbdata/jeff/>`_,
 and `JENDL <https://wwwndc.jaea.go.jp/jendl/jendl.html>`_.
-Note that the package does not support several materials
-in a single ENDF-6 file.
+Files that bundle several materials, including PENDF and
+GENDF tapes, are supported as well; see the guide on
+:doc:`multi-material files <guide/multimaterial_files>`.
 
 
 Install endf-parserpy
@@ -110,6 +113,21 @@ Install endf-parserpy
 
 .. note::
 
+   The :doc:`multi-material file interface <guide/multimaterial_files>`
+   indexes tapes with a structural scan that is faster when
+   `NumPy <https://numpy.org/>`_ is available. To install this
+   optional dependency, add the ``fast`` extra:
+
+   .. code:: bash
+
+      python -m pip install "endf-parserpy[fast]"
+
+   Without NumPy a pure-Python fallback is used, so the
+   dependency is not required.
+
+
+.. note::
+
    The package is still evolving and will be
    extended with convenience functions to enhance
    the user experience. You can always check for updated versions
@@ -128,6 +146,7 @@ Resources
   - :doc:`guide/python_and_cpp_parser`
   - :doc:`guide/command_line_interface`
   - :doc:`guide/reading_writing_endf`
+  - :doc:`guide/multimaterial_files`
   - :doc:`guide/endf_format_validation`
   - :doc:`guide/comparing_endf_files`
   - :doc:`guide/format_translation`
