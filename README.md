@@ -24,8 +24,10 @@ of the major nuclear data libraries, such as
 [ENDF/B](https://www.nndc.bnl.gov/endf/),
 [JEFF](https://www.oecd-nea.org/dbdata/jeff/),
 and [JENDL](https://wwwndc.jaea.go.jp/jendl/jendl.html).
-Note that the package does not support several materials
-in a single ENDF-6 file.
+ENDF-6 files containing several materials (multi-material *tapes*,
+including PENDF/GENDF files that repeat the same material at different
+temperatures) are supported via the `parse_tape`, `iter_parse_tape`
+and `write_tape` functions.
 
 
 ## Install endf-parserpy

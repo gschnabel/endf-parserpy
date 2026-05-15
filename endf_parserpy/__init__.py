@@ -23,6 +23,14 @@ from .utils.user_tools import (
 )
 from .utils.endf6_plumbing import update_directory
 from .utils.math_utils import EndfFloat
+from .tape import (
+    parse_tape,
+    iter_parse_tape,
+    write_tape,
+    FailedMaterial,
+    TapeError,
+    TapeStructureError,
+)
 
 
 __version__ = "0.16.1"
@@ -41,6 +49,13 @@ __all__ = (
     "list_parsed_sections",
     "list_unparsed_sections",
     "sanitize_fieldname_types",
+    # multi-material tape interface
+    "parse_tape",
+    "iter_parse_tape",
+    "write_tape",
+    "FailedMaterial",
+    "TapeError",
+    "TapeStructureError",
     # deprecated aliases
     "EndfParser",
     "BasicEndfParser",
