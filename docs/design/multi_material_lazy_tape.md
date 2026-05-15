@@ -1,6 +1,7 @@
 # Implementation Plan — Multi-Material Tapes & Lazy Indexed Access
 
-Status: **Phases 1–4 implemented; Phase 5 pending**
+Status: **Phases 1–5 implemented** (multi-material parse/write, structural
+index, lazy `EndfFile`, query layer, in-memory editing & write-back)
 Branch: `feature/multi-material-lazy-tape`
 Target version: additive feature, no change to existing API.
 
@@ -241,33 +242,43 @@ Deliverable: `tests/test_tape_query.py` (15 tests, Python and C++ backends) —
 `EndfMaterialPath` parsing/resolution, `get`, ambiguity handling,
 `build_index`, and `query` by value/predicate/tolerance. **Done.**
 
-### Phase 5 — In-memory structural editing & write-back  *(≈1 week)*
+### Phase 5 — In-memory structural editing & write-back  *(≈1 week)* — ✅ implemented
 
 Goal: add/delete/reorder materials and sections, then write.
 
-* `_MaterialSections` and the tape-level material collection are
-  `MutableMapping` subclasses intercepting new-key / `__delitem__` / reorder →
-  set a `structure_modified` flag on the affected material/tape.
-* Detection boundary: *structural* = change to the set/order of
-  `(material, MF, MT)` sections; *value* = anything below a section (tracked by
-  a per-section dirty bit, set via `__setitem__` or a `TrackingDict` wrapper —
-  the engine already ships `TrackingDict`).
-* The index stays valid throughout: it is immutable, identity-keyed, and refers
-  to the *original* file. Deleting/adding in memory never moves on-disk bytes of
-  other sections. New sections have no disk tier (born in-memory/dirty).
-* Write-back via **temp file + atomic `os.replace`**. On POSIX an open lazy
-  handle keeps the old inode alive, so writing back to the *same path* works
-  without full materialisation. On Windows: close-and-reopen (or materialise)
-  first — documented, handled.
-* Directory regeneration: MF1/MT451's directory is **per-material, intra-MAT**.
-  On write, regenerate it (`utils/endf6_plumbing.update_directory`) for any
-  material containing ≥1 modified section, because both structural edits and
-  record-count-changing value edits stale the `NC` entries. Opt-out flag for
-  users wanting verbatim output.
-* Write preserves original material and section order.
+* Each material is a `_MaterialSlot` (`tape/material.py`) carrying an *edit
+  overlay*: `overlay` holds set/added sections keyed by `(MF, MT)`, `deleted`
+  the removed keys. `EndfFile` keeps an ordered list of slots — Phases 3–4
+  (`EndfFile`/`MaterialView`) were refactored onto this slot model. Editing is
+  done through that list and the overlays; the draft's `MutableMapping`
+  interception is unnecessary because nothing needs to *distinguish* structural
+  from value edits — the index stays valid for either (next point), so an edit
+  is just an overlay entry. `MaterialView.is_modified` reports whether a slot
+  has any overlay/deletion.
+* The index stays valid throughout: it is immutable and refers to the
+  *original* file. In-memory add/delete/reorder never moves on-disk bytes, and
+  each slot keeps a stable `original_position` into the index. New materials
+  have no `original_position` (all their sections live in the overlay).
+* `MaterialView` is bound to its slot, not to a position, so it survives a
+  reorder; it becomes invalid only if its material is deleted.
+* Editing API: `material[mf, mt] = section` / `del material[mf, mt]`;
+  `del endf_file[i]`, `endf_file.append_material(material, mat=…)`,
+  `endf_file.reorder(order)`.
+* `EndfFile.save(out=None, *, overwrite=False)` assembles each material into a
+  `{MF: {MT: section}}` dict (untouched sections taken verbatim from disk,
+  edited/added ones from the overlay) and writes via `write_tape`. Untouched
+  sections round-trip byte-exact. Writing to a path goes through a temporary
+  file + atomic `os.replace`, so saving back onto the source file is safe.
 
-Deliverable: `tests/test_tape_editing.py` — add/delete/reorder, same-path
-save, directory regeneration, mixed dirty/clean round-trip.
+Deliverable: `tests/test_tape_editing.py` (14 tests, Python and C++ backends) —
+unedited byte-exact save, value edits, section add/delete, material
+delete/append/reorder, same-path save, view identity through reorder, and a
+pickle round-trip that preserves edits. **Done.**
+
+*Deferred to a follow-up:* automatic regeneration of the MF1/MT451 directory
+(`NC` counts) after edits — `save` currently leaves the directory as-is, so a
+material whose section set changed should have `update_directory` applied. Also
+deferred: streaming the write (`save` assembles all materials before writing).
 
 ---
 
