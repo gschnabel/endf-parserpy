@@ -23,3 +23,20 @@ class TapeStructureError(TapeError):
     record, or a tape that ends in the middle of a material because the
     final MEND or TEND record is missing.
     """
+
+
+class AmbiguousMaterialError(TapeError):
+    """Raised when a MAT number matches several materials.
+
+    PENDF/GENDF tapes repeat the same MAT number at different
+    temperatures. A lookup by MAT number then needs an ``occurrence``
+    index to select among them.
+    """
+
+
+class SectionParseError(TapeError):
+    """Raised when a section fails to parse and ``on_error="raise"``."""
+
+
+class StaleSourceError(TapeError):
+    """Raised when the source file changed after its index was built."""

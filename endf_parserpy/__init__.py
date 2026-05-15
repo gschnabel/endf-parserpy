@@ -29,6 +29,7 @@ from .tape import (
     write_tape,
     FailedMaterial,
     TapeIndex,
+    EndfFile,
     TapeError,
     TapeStructureError,
 )
@@ -56,6 +57,7 @@ __all__ = (
     "write_tape",
     "FailedMaterial",
     "TapeIndex",
+    "EndfFile",
     "TapeError",
     "TapeStructureError",
     # deprecated aliases

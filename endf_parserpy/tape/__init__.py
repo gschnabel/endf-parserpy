@@ -11,7 +11,13 @@
 
 """Support for ENDF files containing several materials (tapes)."""
 
-from .errors import TapeError, TapeStructureError
+from .errors import (
+    TapeError,
+    TapeStructureError,
+    AmbiguousMaterialError,
+    SectionParseError,
+    StaleSourceError,
+)
 from .splitter import split_materials
 from .operations import (
     parse_tape,
@@ -20,6 +26,8 @@ from .operations import (
     FailedMaterial,
 )
 from .index import TapeIndex, MaterialIndexEntry, SectionIndexEntry
+from .material import MaterialView
+from .endf_file import EndfFile, FailedSection
 
 __all__ = (
     "parse_tape",
@@ -30,6 +38,12 @@ __all__ = (
     "TapeIndex",
     "MaterialIndexEntry",
     "SectionIndexEntry",
+    "EndfFile",
+    "MaterialView",
+    "FailedSection",
     "TapeError",
     "TapeStructureError",
+    "AmbiguousMaterialError",
+    "SectionParseError",
+    "StaleSourceError",
 )

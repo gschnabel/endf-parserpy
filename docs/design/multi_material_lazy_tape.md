@@ -1,6 +1,6 @@
 # Implementation Plan — Multi-Material Tapes & Lazy Indexed Access
 
-Status: **Phases 1–2 implemented; Phases 3–5 pending**
+Status: **Phases 1–3 implemented; Phases 4–5 pending**
 Branch: `feature/multi-material-lazy-tape`
 Target version: additive feature, no change to existing API.
 
@@ -168,7 +168,7 @@ parser's section keys, byte offsets verified against a real file on disk,
 `from_file`/`from_lines` agreement, PENDF-like repeated-MAT lookup, source
 stamp, pickle round-trip. **Done.**
 
-### Phase 3 — `EndfFile` lazy access + 3-tier cache  *(≈1 week)*
+### Phase 3 — `EndfFile` lazy access + 3-tier cache  *(≈1 week)* — ✅ implemented
 
 Goal: the stateful lazy class.
 
@@ -178,11 +178,19 @@ Goal: the stateful lazy class.
   `mode` ∈ `{"index", "load_raw", "parse_all"}`.
 * Mapping protocol over the extended address; `tape[i]` → `MaterialView`;
   `MaterialView[mf, mt]` → parsed section.
-* Access path: dirty store → Tier-2 LRU → raw (Tier-1 → disk) → parse via engine.
-* `_WeightedSectionCache`: `OrderedDict`, weight = raw-text byte size (free —
-  taken from the index `SectionIndexEntry`). Evict LRU non-dirty,
-  non-externally-referenced entries until under budget; a single item larger
-  than the budget is admitted alone (with a warning).
+* Access path: Tier-2 parsed-section cache → Tier-1 raw cache → disk → parse
+  via the engine. (The clean/dirty split and the dirty store arrive with the
+  in-memory editing of Phase 5; in a read-only `EndfFile` every cached section
+  is clean.)
+* `cache.py` has two caches, both weighted by the section's raw-text byte size
+  (free — from the index `SectionIndexEntry`): `_RawCache` (Tier 1, byte-budget
+  LRU) and `_SectionCache` (Tier 2). `_SectionCache` keeps *strong* references
+  only within its byte budget; an evicted entry stays weakly referenced, so a
+  section the caller still holds keeps its identity if looked up again. (This
+  replaces the draft's "skip externally-referenced entries during eviction":
+  the cache's own strong reference would always defeat such a check — holding
+  evicted entries weakly is the design that actually works.) A section larger
+  than the whole budget is kept on its own.
 * File access: **open/seek/read-span/close per section read** — no shared file
   handle, no shared seek position. A single coarse `threading.Lock` guards the
   cache mutation, making a shared `EndfFile` thread-safe (serialised).
@@ -190,13 +198,17 @@ Goal: the stateful lazy class.
   path + config + index; `__setstate__` rebuilds. Lets an `EndfFile` (with its
   pre-built index) be sent to `ProcessPoolExecutor` workers.
 * Convenience: `by_mat(mat, *, occurrence=None)` (raises `AmbiguousMaterialError`
-  listing positions if needed), `by_nuclide(za)`, `find(...) -> list`,
-  `materials()`, `failures()`, `ok()`.
-* `__enter__`/`__exit__`; `unload(address=None)`; `repr` shows MAT + nuclide
-  labels per position.
+  listing positions if needed), `by_za(za) -> list`, `find(*, mat=, za=) -> list`,
+  `materials()`. (`failures()`/`ok()` from the draft are dropped: those suit the
+  eager `parse_tape` result list — in a lazy `EndfFile` a parse failure surfaces
+  per section, as a `FailedSection`, only when that section is accessed.)
+* `__enter__`/`__exit__`; `unload(position=None)`; `MaterialView.__repr__` shows
+  the MAT and ZA labels.
 
-Deliverable: `tests/test_endf_file_lazy.py` — lazy access, eviction under a
-tight budget, weakref-pinned identity, pickling round-trip.
+Deliverable: `tests/test_endf_file_lazy.py` (18 tests, Python and C++ backends)
+— lazy access vs. the parser, eviction under a tight budget, weakref-pinned
+identity, the preload modes, secondary lookups, the `on_error` policy,
+`verify_source` staleness detection and a pickle round-trip. **Done.**
 
 ### Phase 4 — `EndfMaterialPath` query layer  *(≈3 days)*
 
