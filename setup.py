@@ -299,6 +299,10 @@ def main():
             "lark>=1.0.0",
             "platformdirs>=4.3.6",
         ],
+        extras_require={
+            # optional accelerator: enables the vectorized TapeIndex scan
+            "fast": ["numpy>=1.20"],
+        },
     )
 
 

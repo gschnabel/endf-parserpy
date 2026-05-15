@@ -22,6 +22,12 @@ parts of the ENDF-6 format: the MAT/MF/MT control fields (columns
 ENDF recipe is consulted and no section body is interpreted, so the
 index is cheap to build and completely independent of the parsing
 engine.
+
+When ``numpy`` is installed and the tape is a uniform array of
+fixed-width records (the common case), a vectorized fast path is used
+that extracts every record's control field in one bulk operation; it
+produces an index identical to the linear scan and falls back to it for
+any tape that is not uniform-width.
 """
 
 import os
@@ -29,7 +35,11 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 from .errors import TapeStructureError
-from .splitter import _control_numbers
+
+try:
+    import numpy as _np
+except ImportError:  # pragma: no cover - numpy is an optional accelerator
+    _np = None
 
 
 def _endf_float(field_text):
@@ -120,53 +130,43 @@ class MaterialIndexEntry:
     sections: Dict[Tuple[int, int], SectionIndexEntry] = field(default_factory=dict)
 
 
-def _iter_byte_records(fh):
-    """Yield ``(offset, byte_length, text)`` for each line of a binary file."""
-    offset = 0
-    for raw in fh:
-        yield offset, len(raw), raw.decode("latin-1")
-        offset += len(raw)
+def _fast_int(field):
+    """Parse an integer from a byte control field.
 
-
-def _iter_line_records(lines):
-    """Yield ``(offset, byte_length, text)`` for an iterable of strings.
-
-    Byte offsets are computed assuming a single ``"\\n"`` terminates
-    each line. They are therefore only exact for a file written that
-    way; use :meth:`TapeIndex.from_file` when exact on-disk offsets are
-    required.
+    A blank or non-numeric field reads as zero, consistent with the
+    ENDF convention for blank control fields.
     """
-    offset = 0
-    for line in lines:
-        line = line.rstrip("\r\n")
-        byte_length = len(line.encode("latin-1", errors="replace")) + 1
-        yield offset, byte_length, line
-        offset += byte_length
+    field = field.strip()
+    if not field:
+        return 0
+    try:
+        return int(field)
+    except ValueError:
+        return 0
 
 
-def _scan(records):
-    """Scan ``records`` into ``(materials, (tpid_line, offset, length))``."""
+def _scan(data):
+    """Scan raw tape bytes into ``(materials, (tpid_line, offset, length))``.
+
+    Only the structural fields are read. The MAT/MF/MT control fields
+    occupy the fixed byte slice ``[66:75]`` of every record; since all
+    records of a section share that slice, a record whose slice is
+    unchanged from its predecessor is known to continue the current
+    section and is accumulated without parsing any integer. This fast
+    path covers the great majority of records.
+
+    Records are delimited by ``"\\n"`` only, matching binary-mode file
+    iteration; a trailing ``"\\r"`` is part of the record's bytes and
+    is stripped only where the text is actually needed.
+    """
+    parts = data.split(b"\n")
+    nparts = len(parts)
+
     materials = []
-    tpid = None
-
-    # the tape head (TPID) is the first non-blank record
-    for offset, byte_length, text in records:
-        if text.strip() == "":
-            continue
-        _, mf, mt = _control_numbers(text)
-        if mf != 0 or mt != 0:
-            raise TapeStructureError(
-                "the tape does not begin with a tape head (TPID) record "
-                f"(found MF={mf}, MT={mt})"
-            )
-        tpid = (text.rstrip("\r\n"), offset, byte_length)
-        break
-    if tpid is None:
-        raise TapeStructureError("the tape does not contain any records")
-
     cur = None  # material under construction
     sec_key = None  # (MF, MT) of the section under construction
     sec_offset = sec_length = sec_lines = 0
+    prev_ctrl = None  # the [66:75] control slice of the previous record
 
     def flush_section():
         # store a section that was left open (e.g. a missing SEND record)
@@ -177,10 +177,60 @@ def _scan(records):
             )
         sec_key = None
 
-    for offset, byte_length, text in records:
-        if text.strip() == "":
+    offset = 0
+    tpid = None
+    index = 0
+
+    # the tape head (TPID) is the first non-blank record
+    while index < nparts:
+        part = parts[index]
+        last = index + 1 == nparts
+        if last and not part:
+            break
+        byte_length = len(part) + (0 if last else 1)
+        if part.strip():
+            mf = _fast_int(part[70:72])
+            mt = _fast_int(part[72:75])
+            if mf != 0 or mt != 0:
+                raise TapeStructureError(
+                    "the tape does not begin with a tape head (TPID) "
+                    f"record (found MF={mf}, MT={mt})"
+                )
+            tpid = (part.rstrip(b"\r").decode("latin-1"), offset, byte_length)
+            offset += byte_length
+            index += 1
+            break
+        offset += byte_length
+        index += 1
+    if tpid is None:
+        raise TapeStructureError("the tape does not contain any records")
+
+    while index < nparts:
+        part = parts[index]
+        last = index + 1 == nparts
+        if last and not part:
+            break
+        byte_length = len(part) + (0 if last else 1)
+        ctrl = part[66:75]
+
+        # fast path: the control fields are unchanged, so this record
+        # continues the section currently under construction
+        if ctrl == prev_ctrl:
+            sec_length += byte_length
+            sec_lines += 1
+            offset += byte_length
+            index += 1
             continue
-        mat, mf, mt = _control_numbers(text)
+
+        if not part.strip():  # blank padding record
+            offset += byte_length
+            index += 1
+            continue
+
+        mat = _fast_int(ctrl[0:4])
+        mf = _fast_int(ctrl[4:6])
+        mt = _fast_int(ctrl[6:9])
+
         if mat == -1:  # TEND: end of tape
             break
         if mat > 0 and mf > 0 and mt > 0:  # regular record
@@ -191,7 +241,7 @@ def _scan(records):
                     "byte_offset": offset,
                     "sections": {},
                 }
-                cur["za"], cur["awr"] = _read_za_awr(text)
+                cur["za"], cur["awr"] = _read_za_awr(part.decode("latin-1"))
             if (mf, mt) != sec_key:
                 flush_section()
                 sec_key = (mf, mt)
@@ -200,24 +250,28 @@ def _scan(records):
                 sec_lines = 0
             sec_length += byte_length
             sec_lines += 1
-            continue
-        if mf != 0 and mt == 0:  # SEND: end of section
+            prev_ctrl = ctrl
+        elif mf != 0 and mt == 0:  # SEND: end of section
             if sec_key is not None and cur is not None:
                 cur["sections"][sec_key] = SectionIndexEntry(
                     sec_offset, sec_length + byte_length, sec_lines + 1
                 )
             sec_key = None
-            continue
-        if mat == 0 and mf == 0 and mt == 0:  # MEND: end of material
+            prev_ctrl = None
+        elif mat == 0 and mf == 0 and mt == 0:  # MEND: end of material
             flush_section()
             if cur is not None:
                 cur["byte_length"] = offset + byte_length - cur["byte_offset"]
                 materials.append(MaterialIndexEntry(**cur))
                 cur = None
-            continue
-        # FEND (mat > 0, mf == 0, mt == 0) or any other record: a section
-        # cannot continue across it
-        flush_section()
+            prev_ctrl = None
+        else:  # FEND (mat > 0, mf == 0, mt == 0), or any other record
+            # a section cannot continue across such a record
+            flush_section()
+            prev_ctrl = None
+
+        offset += byte_length
+        index += 1
 
     if cur is not None:
         raise TapeStructureError(
@@ -225,6 +279,162 @@ def _scan(records):
             "TEND record is missing"
         )
     return materials, tpid
+
+
+def _vec_scan(data):
+    """Vectorized structural scan for a uniform fixed-width tape.
+
+    Return ``(materials, tpid)`` on a clean parse of a tape that is a
+    uniform array of fixed-width records, or ``None`` for any tape that
+    is not uniform-width or not cleanly structured. In the latter case
+    the caller falls back to :func:`_scan`, which is the authority for
+    both the index and any structural error.
+
+    The record width ``L`` is inferred from the first newline and then
+    *proven* uniform: the buffer is reshaped to an ``(N, L)`` matrix and
+    column ``L-1`` is required to be a newline on every row. The control
+    field of every record is the byte slice ``[66:75]``; a section or
+    material boundary is exactly a row whose control field differs from
+    its predecessor, so the per-record scan collapses into a loop over
+    *runs* of identical control fields.
+
+    A tape whose only irregularity is an unterminated final TEND record
+    and/or a few trailing blank lines is still accepted: the partial
+    trailing record (always shorter than one record) is trimmed before
+    the width check, since nothing past the last material affects the
+    index. The trim is gated on the tail being benign -- only
+    whitespace, or a TEND record -- so a genuinely truncated record is
+    never silently dropped.
+    """
+    n = len(data)
+    if n == 0:
+        return None
+    first_nl = data.find(b"\n")
+    if first_nl < 0:
+        return None
+    line_width = first_nl + 1
+    # the control field ends at column 75, so a record must be wide
+    # enough to contain it
+    if line_width < 76:
+        return None
+    remainder = n % line_width
+    if remainder:
+        # the tape does not end on a record boundary -- typically an
+        # unterminated TEND record and/or trailing blank lines. Trim the
+        # partial trailing record so the uniform body before it can
+        # still take the fast path, but only if that tail is benign
+        # (whitespace, or a TEND record); a non-benign tail is a
+        # truncated record and is left for the linear scan to judge.
+        tail = data[n - remainder :]
+        if tail.strip() and _fast_int(tail[66:70]) != -1:
+            return None
+        data = data[: n - remainder]
+        n -= remainder
+    num_lines = n // line_width
+    arr = _np.frombuffer(data, dtype=_np.uint8).reshape(num_lines, line_width)
+    # certain fixed-width check: the last byte of every record is "\n"
+    if not bool(_np.all(arr[:, line_width - 1] == 0x0A)):
+        return None
+
+    ctrl = arr[:, 66:75]  # the MAT/MF/MT control field of every record
+
+    # the TPID is the first record with a non-blank control field
+    nonblank = _np.any(ctrl != 0x20, axis=1)
+    if not bool(_np.any(nonblank)):
+        return None
+    tpid_row = int(_np.argmax(nonblank))
+    if tpid_row and data[: tpid_row * line_width].strip():
+        return None  # non-blank content before the TPID
+    head = ctrl[tpid_row].tobytes()
+    if _fast_int(head[4:6]) != 0 or _fast_int(head[6:9]) != 0:
+        return None  # does not begin with a TPID record
+    tpid_offset = tpid_row * line_width
+    tpid = (
+        data[tpid_offset : tpid_offset + line_width].rstrip(b"\r\n").decode("latin-1"),
+        tpid_offset,
+        line_width,
+    )
+
+    # run-segment every record after the TPID
+    body = ctrl[tpid_row + 1 :]
+    if len(body) == 0:
+        return [], tpid
+    boundary = _np.any(body[1:] != body[:-1], axis=1)
+    starts = _np.concatenate(([0], _np.flatnonzero(boundary) + 1)) + tpid_row + 1
+    ends = _np.concatenate((starts[1:], [num_lines]))
+
+    materials = []
+    cur = None
+    sec_key = None
+    sec_offset = sec_length = sec_lines = 0
+
+    def flush_section():
+        nonlocal sec_key
+        if sec_key is not None and cur is not None:
+            cur["sections"][sec_key] = SectionIndexEntry(
+                sec_offset, sec_length, sec_lines
+            )
+        sec_key = None
+
+    for start, end in zip(starts.tolist(), ends.tolist()):
+        ctrl_field = ctrl[start].tobytes()
+        run_offset = start * line_width
+        run_length = (end - start) * line_width
+        if not ctrl_field.strip():  # blank-control run
+            if data[run_offset : end * line_width].strip():
+                return None  # a record carrying data but a blank control field
+            continue
+        mat = _fast_int(ctrl_field[0:4])
+        mf = _fast_int(ctrl_field[4:6])
+        mt = _fast_int(ctrl_field[6:9])
+        if mat == -1:  # TEND: end of tape
+            break
+        if mat > 0 and mf > 0 and mt > 0:  # a run of regular section records
+            if cur is None:
+                cur = {
+                    "position": len(materials),
+                    "mat": mat,
+                    "byte_offset": run_offset,
+                    "sections": {},
+                }
+                cur["za"], cur["awr"] = _read_za_awr(
+                    data[run_offset : run_offset + line_width].decode("latin-1")
+                )
+            if (mf, mt) != sec_key:
+                flush_section()
+                sec_key = (mf, mt)
+                sec_offset = run_offset
+                sec_length = 0
+                sec_lines = 0
+            sec_length += run_length
+            sec_lines += end - start
+        elif mf != 0 and mt == 0:  # SEND: end of section
+            if sec_key is not None and cur is not None:
+                cur["sections"][sec_key] = SectionIndexEntry(
+                    sec_offset, sec_length + run_length, sec_lines + (end - start)
+                )
+            sec_key = None
+        elif mat == 0 and mf == 0 and mt == 0:  # MEND: end of material
+            flush_section()
+            if cur is not None:
+                cur["byte_length"] = end * line_width - cur["byte_offset"]
+                materials.append(MaterialIndexEntry(**cur))
+                cur = None
+        else:  # FEND, or any other record a section cannot span
+            flush_section()
+
+    if cur is not None:
+        return None  # truncated tape -- let _scan raise the structural error
+    return materials, tpid
+
+
+def _scan_data(data):
+    """Scan raw tape bytes, using the vectorized fast path when possible."""
+    if _np is not None:
+        result = _vec_scan(data)
+        if result is not None:
+            return result
+    return _scan(data)
 
 
 class TapeIndex:
@@ -279,7 +489,8 @@ class TapeIndex:
         """Build an index of the ENDF tape stored at ``path``."""
         path = os.fspath(path)
         with open(path, "rb") as fh:
-            materials, tpid = _scan(_iter_byte_records(fh))
+            data = fh.read()
+        materials, tpid = _scan_data(data)
         stat = os.stat(path)
         return cls(
             materials,
@@ -293,8 +504,21 @@ class TapeIndex:
 
     @classmethod
     def from_lines(cls, lines, source=None):
-        """Build an index from an iterable of ENDF tape lines."""
-        materials, tpid = _scan(_iter_line_records(lines))
+        """Build an index from an iterable of ENDF tape lines.
+
+        Byte offsets are computed assuming a single ``"\\n"`` terminates
+        each line; they are therefore only exact for a file written
+        that way. Use :meth:`from_file` when exact on-disk offsets are
+        required.
+        """
+        data = (
+            b"\n".join(
+                line.rstrip("\r\n").encode("latin-1", errors="replace")
+                for line in lines
+            )
+            + b"\n"
+        )
+        materials, tpid = _scan_data(data)
         return cls(materials, tpid[0], tpid[1], tpid[2], source=source)
 
     def by_mat(self, mat):
