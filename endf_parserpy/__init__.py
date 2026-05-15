@@ -28,6 +28,7 @@ from .tape import (
     iter_parse_tape,
     write_tape,
     FailedMaterial,
+    TapeIndex,
     TapeError,
     TapeStructureError,
 )
@@ -54,6 +55,7 @@ __all__ = (
     "iter_parse_tape",
     "write_tape",
     "FailedMaterial",
+    "TapeIndex",
     "TapeError",
     "TapeStructureError",
     # deprecated aliases

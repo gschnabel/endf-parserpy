@@ -19,6 +19,7 @@ from .operations import (
     write_tape,
     FailedMaterial,
 )
+from .index import TapeIndex, MaterialIndexEntry, SectionIndexEntry
 
 __all__ = (
     "parse_tape",
@@ -26,6 +27,9 @@ __all__ = (
     "write_tape",
     "split_materials",
     "FailedMaterial",
+    "TapeIndex",
+    "MaterialIndexEntry",
+    "SectionIndexEntry",
     "TapeError",
     "TapeStructureError",
 )

@@ -1,6 +1,6 @@
 # Implementation Plan — Multi-Material Tapes & Lazy Indexed Access
 
-Status: **Phase 1 implemented; Phases 2–5 pending**
+Status: **Phases 1–2 implemented; Phases 3–5 pending**
 Branch: `feature/multi-material-lazy-tape`
 Target version: additive feature, no change to existing API.
 
@@ -145,13 +145,14 @@ Goal: parse and write tapes with N materials, fully eager, no index/cache.
 Deliverable: README limitation note removed; `tests/test_multimaterial.py`
 (23 tests, Python and C++ backends). **Done.**
 
-### Phase 2 — Structural index  *(≈2 days)*
+### Phase 2 — Structural index  *(≈2 days)* — ✅ implemented
 
 Goal: scan a tape into a recipe-free index without parsing section bodies.
 
-* `TapeIndex.from_file(path)` — one linear pass, refactored from the structural
-  half of `split_sections` (`endf_utils.py:459`). Per material records a
-  `MaterialIndexEntry`:
+* `TapeIndex.from_file(path)` / `TapeIndex.from_lines(lines)` — one linear
+  pass, with the structural scan logic of `split_sections` (`endf_utils.py:459`)
+  reimplemented standalone in `tape/index.py` (kept recipe-free; the existing
+  `split_sections` is not touched). Per material records a `MaterialIndexEntry`:
   * `position` (0-based), `mat`, `za`, `awr` — `za`/`awr` from HEAD `C1`/`C2`
     (universal, recipe-free);
   * `byte_offset`, `byte_length` of the whole material;
@@ -159,10 +160,13 @@ Goal: scan a tape into a recipe-free index without parsing section bodies.
 * Secondary maps: `mat -> [positions]`, `za -> [positions]`.
 * Source-identity stamp: `(st_size, st_mtime_ns)` captured at scan time for
   optional staleness checks.
-* The index is immutable and cheaply picklable (plain dataclasses).
+* The index is treated as read-only and is cheaply picklable (plain
+  dataclasses plus a small wrapper class).
 
-Deliverable: `tests/test_tape_index.py` — index vs. known fixtures, PENDF tape
-with repeated MAT.
+Deliverable: `tests/test_tape_index.py` (19 tests) — index structure vs. the
+parser's section keys, byte offsets verified against a real file on disk,
+`from_file`/`from_lines` agreement, PENDF-like repeated-MAT lookup, source
+stamp, pickle round-trip. **Done.**
 
 ### Phase 3 — `EndfFile` lazy access + 3-tier cache  *(≈1 week)*
 
