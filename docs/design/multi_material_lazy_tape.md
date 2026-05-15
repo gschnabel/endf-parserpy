@@ -1,6 +1,6 @@
 # Implementation Plan — Multi-Material Tapes & Lazy Indexed Access
 
-Status: **DRAFT FOR REVIEW**
+Status: **Phase 1 implemented; Phases 2–5 pending**
 Branch: `feature/multi-material-lazy-tape`
 Target version: additive feature, no change to existing API.
 
@@ -93,16 +93,20 @@ both. The arrow never points upward — the index must never import a recipe.
 `EndfMaterialPath` is a new, separate type that *composes* an `EndfPath`, so
 existing `EndfPath` behaviour and grammar are unchanged.
 
-### Minimal changes to existing files (additive, behaviour-preserving)
+### Changes to existing files
 
-| File | Change | Risk |
-|------|--------|------|
-| `interpreter/endf_parser.py` | `write()`/`writefile()` gain `include_tpid=True`, `include_tend=True` keyword args (default `True` = today's behaviour). The TPID block and the TEND block (`endf_parser.py:1144-1157`) become conditional. | very low — defaults preserve output |
-| `cpp_parsers/endf_parser_cpp.py` | mirror the same two kwargs on `write()`/`writefile()` | very low |
-| `endf_parser_base.py` | document the two new kwargs in the abstract signature | none |
+**None.** The only edit to existing code is the re-export block in
+`endf_parserpy/__init__.py` (above). `parse`, `parsefile`, `write`,
+`writefile`, `split_sections`, the recipe engine and the C++ generated code
+are all untouched.
 
-No change to `parse`, `parsefile`, `split_sections`, the recipe engine, or the
-C++ generated code.
+The design draft proposed adding `include_tpid` / `include_tend` keyword
+arguments to the engine's `write()`. During Phase 1 implementation this was
+dropped: the C++ backend emits the whole tape (TPID … TEND) inside C++, so the
+keyword approach would have required C++ changes. Instead `write_tape`
+**post-processes** each material's writer output — stripping the per-material
+TPID and TEND records and re-emitting one of each for the whole tape. This
+works identically for both backends and needs zero engine changes.
 
 ---
 
@@ -111,7 +115,7 @@ C++ generated code.
 Each phase is independently reviewable and mergeable. Phase 1 already removes
 the documented limitation; later phases add the lazy/indexed/editing layers.
 
-### Phase 1 — Eager multi-material parse/write  *(≈3 days)*
+### Phase 1 — Eager multi-material parse/write  *(≈3 days)* — ✅ implemented
 
 Goal: parse and write tapes with N materials, fully eager, no index/cache.
 
@@ -127,8 +131,10 @@ Goal: parse and write tapes with N materials, fully eager, no index/cache.
   time; peak memory bounded by the largest single material. `parse_tape` is
   `list(iter_parse_tape(...))`.
 * `write_tape(materials, out=None, *, include=None, exclude=None)`:
-  emits the TPID once, each material body + its MEND, one final TEND — using the
-  new `include_tpid`/`include_tend` kwargs on the engine's `write()`.
+  emits the TPID once, each material body + its MEND, one final TEND. Each
+  material is written with the unchanged engine `write()`; `write_tape` then
+  strips the per-material TPID/TEND records from that output (post-processing,
+  uniform across both backends — see Section 4).
 * `include`/`exclude` accept today's MF / `(MF,MT)` tuples (apply to *all*
   materials) **and** `EndfMaterialPath` strings (`"9225#1/3"`) to scope per
   material. Tuple ambiguity (is `(9225,3)` MAT/MF or MF/MT?) is avoided by
@@ -136,7 +142,8 @@ Goal: parse and write tapes with N materials, fully eager, no index/cache.
 * `on_error`: `raise` aborts; `mark` keeps the failed material as a
   `FailedMaterial` object exposing `.exception` and `.raw_lines`.
 
-Deliverable: README limitation note removed; `tests/test_multimaterial.py`.
+Deliverable: README limitation note removed; `tests/test_multimaterial.py`
+(23 tests, Python and C++ backends). **Done.**
 
 ### Phase 2 — Structural index  *(≈2 days)*
 
