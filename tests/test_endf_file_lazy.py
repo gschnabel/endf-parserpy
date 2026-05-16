@@ -138,6 +138,19 @@ def test_weakref_preserves_identity(tape_file, parser):
     assert endf_file[0][1, 451]._target is held._target
 
 
+def test_section_cache_keeps_no_bookkeeping_beyond_strong_tier():
+    # regression: the parsed-section cache must not retain per-entry
+    # bookkeeping for evicted sections -- its only growing structure is
+    # the strong tier, which the byte budget bounds
+    from endf_parserpy.tape.cache import _SectionCache, _Section
+
+    cache = _SectionCache(max_bytes=100)
+    for i in range(1000):
+        cache.put((i, 3, 2), _Section({"value": i}), weight=40)
+    assert cache.nbytes <= cache.max_bytes
+    assert len(cache._strong) <= 3  # only ~two 40-byte entries fit the budget
+
+
 def test_unload_clears_cache(tape_file, parser):
     endf_file = EndfFile(tape_file, parser=parser)
     endf_file[0][1, 451]

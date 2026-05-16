@@ -3,6 +3,7 @@ import pytest
 from pathlib import Path
 
 from endf_parserpy import EndfParserFactory, EndfFile
+from endf_parserpy.tape import SectionRenderError
 
 
 TESTDATA = Path(__file__).parent / "testdata"
@@ -182,6 +183,32 @@ def test_append_material(tmp_path, parser):
     reopened = EndfFile(out, parser=parser)
     assert len(reopened) == 2
     assert reopened[1].mat == 3025
+
+
+def test_append_material_eager_rejects_malformed_section(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    # under check_edits="eager" a malformed appended section is rejected
+    # right away, not deferred to export() time
+    with pytest.raises(SectionRenderError):
+        endf_file.append_material({1: {451: {"bogus": 1}}}, mat=9999)
+    assert len(endf_file) == 1  # nothing was appended
+
+
+def test_append_material_rejects_bad_section_type(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    with pytest.raises(TypeError):
+        endf_file.append_material({3: {2: 42}}, mat=9999)
+    assert len(endf_file) == 1
+
+
+def test_delete_material_drops_cached_view(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU, ZN])
+    endf_file[0]  # materialise and cache the views
+    endf_file[1]
+    assert len(endf_file._material_views) == 2
+    del endf_file[0]
+    # the deleted material's view is dropped, not leaked
+    assert len(endf_file._material_views) == 1
 
 
 def test_reorder(tmp_path, parser):

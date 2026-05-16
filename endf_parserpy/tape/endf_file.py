@@ -293,6 +293,18 @@ class EndfFile:
             self._material_views[slot] = view
         return view
 
+    def _remove_material(self, position):
+        """Delete the material at ``position`` and drop its cached view.
+
+        Dropping the :class:`MaterialView` keeps ``_material_views`` from
+        accumulating entries for materials that no longer exist; an
+        external reference to the view stays valid as an *invalid* view
+        (its :attr:`~MaterialView.position` then raises).
+        """
+        with self._lock:
+            slot = self._materials.pop(position)
+            self._material_views.pop(slot, None)
+
     def _resolve_key(self, key):
         """Resolve a path key to ``(position, mf, mt, subpath)``.
 
@@ -353,8 +365,7 @@ class EndfFile:
         """Delete the material, section or field addressed by ``key``."""
         self._ensure_valid()
         if isinstance(key, int):
-            with self._lock:
-                del self._materials[key]
+            self._remove_material(key)
             return
         if not isinstance(key, (str, EndfMaterialPath)):
             raise TypeError(
@@ -364,8 +375,7 @@ class EndfFile:
         position, mf, mt, subpath = self._resolve_key(key)
         slot = self._materials[position]
         if mf is None:
-            with self._lock:
-                del self._materials[position]
+            self._remove_material(position)
         elif subpath is None:
             self._delete_slot_section(slot, mf, mt)
         else:
@@ -438,6 +448,13 @@ class EndfFile:
         -------
         MaterialView
             A view of the appended material.
+
+        Notes
+        -----
+        Under ``check_edits="eager"`` every section of the appended
+        material is render-checked immediately, exactly as a section
+        assignment is, so a malformed section is rejected here rather
+        than at :meth:`export` time.
         """
         self._ensure_valid()
         slot = _MaterialSlot(original_position=None, mat=mat, za=za, awr=awr)
@@ -445,7 +462,18 @@ class EndfFile:
             if mf == 0:
                 continue
             for mt, section in mtdic.items():
-                slot.overlay[(int(mf), int(mt))] = section
+                mf_mt = (int(mf), int(mt))
+                if isinstance(section, _SectionView):
+                    section = section.detach()
+                if not isinstance(section, (Mapping, list)):
+                    raise TypeError(
+                        f"section MF={mf_mt[0]}/MT={mf_mt[1]} of the appended "
+                        "material must be a mapping (parsed) or a list of "
+                        "strings (raw)"
+                    )
+                if self._check_edits == "eager":
+                    self._check_section(*mf_mt, section)
+                slot.overlay[mf_mt] = section
         with self._lock:
             self._materials.append(slot)
         return self[len(self._materials) - 1]
@@ -545,7 +573,7 @@ class EndfFile:
         specs, is_multi = parse_index_spec(section_path)
         mapping = {}
         for position, slot in enumerate(self._materials):
-            values = self._collect_index_values(slot, position, specs)
+            values = self._collect_index_values(slot, specs)
             if values is None:
                 continue
             key = tuple(values) if is_multi else values[0]
@@ -560,14 +588,15 @@ class EndfFile:
             self._secondary_indexes[name] = mapping
         return mapping
 
-    def _collect_index_values(self, slot, position, specs):
+    def _collect_index_values(self, slot, specs):
         """Return the field values for ``build_index``, or ``None`` to skip.
 
         ``specs`` is a list of ``(mf, mt, subpath)``. A section is parsed
         once even when several specs address the same ``MF/MT``. The
         material is skipped (``None`` is returned) when it lacks any of
         the addressed sections or fields, or when a needed section
-        failed to parse under ``on_error="mark"``.
+        failed to parse under ``on_error="mark"`` (under
+        ``on_error="raise"`` the failing parse propagates instead).
         """
         keys = self._slot_section_keys_set(slot)
         parsed = {}
@@ -579,11 +608,9 @@ class EndfFile:
             if section is None:
                 section = self._get_slot_section(slot, mf, mt)
                 if isinstance(section, FailedSection):
-                    if self._on_error == "raise":
-                        raise SectionParseError(
-                            f"MF={mf}/MT={mt} of the material at position "
-                            f"{position} failed to parse"
-                        ) from section.exception
+                    # on_error="mark": skip a material whose section
+                    # failed to parse (under "raise" the parse already
+                    # raised and never returned a FailedSection here)
                     return None
                 parsed[(mf, mt)] = section
             if not section_has(section, subpath):
@@ -607,11 +634,8 @@ class EndfFile:
                 continue
             section = self._get_slot_section(slot, mf, mt)
             if isinstance(section, FailedSection):
-                if self._on_error == "raise":
-                    raise SectionParseError(
-                        f"MF={mf}/MT={mt} of the material at position "
-                        f"{position} failed to parse"
-                    ) from section.exception
+                # on_error="mark": skip an unparsable section (under
+                # "raise" the parse already raised above)
                 continue
             if not section_has(section, subpath):
                 continue

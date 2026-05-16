@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -94,58 +94,53 @@ class _SectionCache:
     Strong references are kept only within ``max_bytes``; an evicted
     entry remains weakly referenced, so if the caller still holds the
     section it is returned (with its identity) on the next lookup
-    instead of being re-parsed.
+    instead of being re-parsed. A section served from the weak tier is
+    returned by identity but is *not* promoted back into the strong
+    tier, so the cache keeps per-entry bookkeeping only for the strong
+    entries it actually counts against its budget.
     """
 
     def __init__(self, max_bytes):
         self.max_bytes = max_bytes
-        self._strong = OrderedDict()
+        self._strong = OrderedDict()  # key -> (section, weight)
         self._weak = WeakValueDictionary()
-        self._weights = {}
         self._size = 0
 
     def get(self, key):
-        if key in self._strong:
+        entry = self._strong.get(key)
+        if entry is not None:
             self._strong.move_to_end(key)
-            return self._strong[key]
-        obj = self._weak.get(key)
-        if obj is not None:
-            # evicted from the strong cache but still alive elsewhere
-            self._promote(key, obj)
-            return obj
-        return None
+            return entry[0]
+        # evicted from the strong cache but possibly still alive
+        # elsewhere: return it by identity without re-promoting it, so
+        # no bookkeeping is retained for a section the budget no longer
+        # accounts for (WeakValueDictionary.get yields None if it died)
+        return self._weak.get(key)
 
     def put(self, key, value, weight):
-        self._weights[key] = weight
         try:
             self._weak[key] = value
         except TypeError:
             pass  # value not weakly referenceable; identity not preserved
-        self._promote(key, value)
-
-    def _promote(self, key, value):
         if key in self._strong:
-            self._size -= self._weights[key]
-        self._strong[key] = value
+            self._size -= self._strong[key][1]
+        self._strong[key] = (value, weight)
         self._strong.move_to_end(key)
-        self._size += self._weights[key]
+        self._size += weight
         while self._size > self.max_bytes and len(self._strong) > 1:
-            old, _ = self._strong.popitem(last=False)
-            self._size -= self._weights[old]
+            _, (_, evicted_weight) = self._strong.popitem(last=False)
+            self._size -= evicted_weight
 
     def drop_material(self, position):
         for key in [k for k in self._strong if k[0] == position]:
-            self._size -= self._weights[key]
+            self._size -= self._strong[key][1]
             del self._strong[key]
-        for key in [k for k in self._weights if k[0] == position]:
-            del self._weights[key]
         for key in [k for k in list(self._weak) if k[0] == position]:
             self._weak.pop(key, None)
 
     def clear(self):
         self._strong.clear()
         self._weak.clear()
-        self._weights.clear()
         self._size = 0
 
     @property
