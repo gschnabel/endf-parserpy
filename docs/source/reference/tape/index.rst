@@ -48,4 +48,6 @@ raises the :class:`TapeError` subclasses listed below.
 
 .. autoexception:: SectionParseError
 
+.. autoexception:: SectionRenderError
+
 .. autoexception:: StaleSourceError

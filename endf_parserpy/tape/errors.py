@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -42,6 +42,17 @@ class AmbiguousMaterialError(TapeError, LookupError):
 
 class SectionParseError(TapeError):
     """Raised when a section fails to parse and ``on_error="raise"``."""
+
+
+class SectionRenderError(TapeError):
+    """Raised when an edited section fails to render to ENDF-6 text.
+
+    In ``check_edits="eager"`` mode every edited section is rendered
+    through the parser's writer right away; a section that no longer
+    conforms to its ENDF recipe makes the writer fail, which is reported
+    as this error with the writer's own exception kept as its cause. The
+    same error is collected by :meth:`~endf_parserpy.EndfFile.verify`.
+    """
 
 
 class StaleSourceError(TapeError):

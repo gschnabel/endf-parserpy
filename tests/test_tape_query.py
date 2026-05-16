@@ -115,11 +115,15 @@ def test_get_ambiguous(tmp_path, parser):
     assert endf_file.get("2925#1/1/451/AWR") == endf_file[1][1, 451]["AWR"]
 
 
-def test_get_requires_a_section(tmp_path, parser):
+def test_get_material_depth_returns_material_view(tmp_path, parser):
+    # get() is relaxed: a material-depth path yields a MaterialView,
+    # the exact synonym of endf_file[path].
     tape = _write_tape(tmp_path, [CU])
     endf_file = EndfFile(tape, parser=parser)
-    with pytest.raises(ValueError, match="section"):
-        endf_file.get("#0")
+    material = endf_file.get("#0")
+    assert material.position == 0
+    assert material.mat == endf_file[0].mat
+    assert endf_file.get("2925").mat == 2925
 
 
 def test_get_failed_section_raises(tmp_path, parser):

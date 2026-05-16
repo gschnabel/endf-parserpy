@@ -296,3 +296,70 @@ for the material at position ``k``:
 The path may stop at a section, in which case the whole
 section is returned, or continue into it to address a single
 field.
+
+Path-addressed access and editing
+---------------------------------
+
+The :meth:`~endf_parserpy.EndfFile.get` method has a shorter
+spelling: an :class:`~endf_parserpy.EndfFile` can be indexed
+directly with an :class:`~endf_parserpy.EndfMaterialPath`. The
+``[]``, ``[]=``, ``del`` and ``in`` operators all accept such a
+path — a string or an :class:`~endf_parserpy.EndfMaterialPath`
+object — in addition to an integer material position, so a tape
+reads and edits like a path-addressable mapping:
+
+.. code:: Python
+
+   awr = endf_file['9237#1/3/2/AWR']     # read a field
+   endf_file['9237#1/3/2/AWR'] = 63.5    # write a field
+   section = endf_file['#0/3/2']         # read a whole section
+   del endf_file['#0/3/18']              # delete a section
+   del endf_file['#1']                   # delete a material
+   present = '#0/1/451/TEMP' in endf_file  # test for presence
+
+``endf_file.get(path)`` is the explicit-method synonym of
+``endf_file[path]``; both return the same thing — a
+:class:`~endf_parserpy.tape.MaterialView` for a material-depth
+path, a section for an ``MF/MT`` path, and the value at the
+field for a deeper path.
+
+A retrieved section is not a plain dictionary but a *view* over
+the tape, and what that view permits is governed by the
+``check_edits`` argument of the :class:`~endf_parserpy.EndfFile`
+constructor:
+
+.. code:: Python
+
+   from endf_parserpy import EndfFile
+
+   strict = EndfFile('tape.endf')                          # check_edits='eager'
+   relaxed = EndfFile('tape.endf', check_edits='deferred')
+
+With ``check_edits='eager'`` (the default) every edit is rendered
+through the parser's writer immediately, so a change that breaks
+the ENDF recipe raises :class:`~endf_parserpy.tape.SectionRenderError`
+at the offending assignment. A section retrieved in this mode is
+a *read-only* view; to edit it, take a standalone copy with its
+``detach()`` method, change the copy and assign it back:
+
+.. code:: Python
+
+   section = strict['#0/3/2'].detach()   # a plain, mutable dict
+   section['QI'] = 0.0
+   strict['#0/3/2'] = section            # rendered and checked here
+
+With ``check_edits='deferred'`` a retrieved section is instead a
+*live* view: assigning into it writes straight through to the
+tape, exactly as for an :class:`~endf_parserpy.EndfDict`.
+Recipe-conformity is then checked only when the tape is saved, or
+on demand via :meth:`~endf_parserpy.EndfFile.verify`:
+
+.. code:: Python
+
+   relaxed['#0/3/2']['QI'] = 0.0         # writes through to the tape
+   report = relaxed.verify()             # [] if every edit is conformant
+
+A view — frozen or live — is itself path-addressable: a string
+key is read as an :class:`~endf_parserpy.EndfPath` relative to
+the view, so ``relaxed['#0/3/2']['xstable/E']`` and
+``relaxed['#0/3/2/xstable/E']`` reach the same data.

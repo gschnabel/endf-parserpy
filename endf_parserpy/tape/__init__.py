@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -16,6 +16,7 @@ from .errors import (
     TapeStructureError,
     AmbiguousMaterialError,
     SectionParseError,
+    SectionRenderError,
     StaleSourceError,
 )
 from .splitter import split_materials
@@ -47,5 +48,6 @@ __all__ = (
     "TapeStructureError",
     "AmbiguousMaterialError",
     "SectionParseError",
+    "SectionRenderError",
     "StaleSourceError",
 )

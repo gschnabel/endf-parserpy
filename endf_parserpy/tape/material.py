@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -57,6 +57,12 @@ class MaterialView:
         material[3, 2] = edited_section
         del material[3, 2]
 
+    Reading a section returns a *view* over the parsed section whose
+    mutability follows the file's ``check_edits`` mode -- read-only under
+    ``"eager"`` and a live write-through view under ``"deferred"`` (see
+    :mod:`endf_parserpy.tape.views`). A section that failed to parse
+    raises :class:`~endf_parserpy.tape.SectionParseError` on access.
+
     The view is bound to the underlying material, so it stays valid if
     the tape is reordered; it becomes invalid only if that material is
     deleted.
@@ -96,7 +102,9 @@ class MaterialView:
         return self._file._slot_section_keys(self._slot)
 
     def __getitem__(self, key):
-        return self._file._get_slot_section(self._slot, *_as_mfmt(key))
+        mf, mt = _as_mfmt(key)
+        section = self._file._get_slot_section(self._slot, mf, mt)
+        return self._file._view(self._slot, mf, mt, section)
 
     def __setitem__(self, key, value):
         self._file._set_slot_section(self._slot, *_as_mfmt(key), value)

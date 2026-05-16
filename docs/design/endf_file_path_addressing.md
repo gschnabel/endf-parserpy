@@ -1,6 +1,6 @@
 # Design Note — Path-Addressed Access on `EndfFile`
 
-Status: **proposed** (design review)
+Status: **implemented**
 Branch: `feature/multi-material-lazy-tape`
 Builds on: `multi_material_lazy_tape.md` (Phases 1–5, implemented)
 Target version: additive feature on the still-unreleased tape API.
@@ -36,6 +36,7 @@ settles two further questions: *when* an edit's recipe-conformity is checked
 | P1 | **`__getitem__`, `__setitem__`, `__delitem__` and `__contains__` are polymorphic.** They accept an integer material position *or* an `EndfMaterialPath` (string or object). No separate `set`/`exists`/`remove` method trio is introduced; `[]`, `[]=`, `del` and `in` carry those roles. The integer form is sugar for the `#k` material selector. |
 | P2 | **The recipe-conformity of an edited section is checked by rendering it through the parser's writer** — the engine's only validation mechanism. A `check_edits` constructor argument selects *when* the check runs: `"eager"` (the default) renders on every write and raises at the offending statement; `"deferred"` defers the check to `save()` or `verify()`. |
 | P3 | **A retrieved section is a recursive *view* over the canonical cached section, never a defensive copy.** Its mutability follows `check_edits`: `"eager"` yields a recursively read-only (frozen) view; `"deferred"` yields a live write-through view that edits the material's overlay directly. `.detach()` produces a standalone plain mutable copy on demand. |
+| P4 | **A section or field view accepts an `EndfPath` string as a key**, not only a plain leaf key. `view["xstable/E"]` reads, and on a live view `view["xstable/E"] = [...]` writes, the same as the chained-`[]` spelling. This mirrors `EndfDict`, so a retrieved view is path-addressable all the way down. Resolution and write-through follow the view's mode (P3); the `EndfPath` reach is *within* a section, the leading material/MF/MT selector stays the job of `EndfMaterialPath`. |
 
 P1 mirrors `EndfDict`, where `d[path]` yields a sub-view or a leaf depending on
 the depth the `EndfPath` reaches. `EndfFile` is **not** made a subclass of
@@ -207,6 +208,13 @@ same as `get` (§10):
 * **field** → the value at the sub-path: a scalar, or, if the sub-path stops
   at a nested container, a view of that container.
 
+A section or field view is itself path-addressable (decision **P4**): a string
+key is interpreted as an `EndfPath` *relative to the view*, so
+`endf_file["#0/3/2"]["xstable/E"]` and `endf_file["#0/3/2/xstable/E"]` reach the
+same leaf. A plain (single-component) key still works unchanged — a one-element
+`EndfPath` is just that key — so the addition is transparent to callers that
+index a view with a bare field name or list position.
+
 ---
 
 ## 7. Write
@@ -231,12 +239,16 @@ immediately and a malformed result raises at the assignment; under
 `"deferred"` it is stored dirty and checked at `save()` / `verify()`.
 
 **In-place mutation of a retrieved view** — meaningful only under
-`check_edits="deferred"`, where the live view writes through (§5.2):
+`check_edits="deferred"`, where the live view writes through (§5.2). The
+target may be a plain key or an `EndfPath` string (decision **P4**):
 
     endf_file[0][3, 2]['AWR'] = 99.0
+    endf_file['#0/3/2']['xstable/E'] = [1, 2, 3, 4]   # path-addressed write
 
 Under `check_edits="eager"` the retrieved view is frozen, so in-place mutation
-raises `TypeError`; assignment or `detach()` is the route.
+raises `TypeError` whatever the key spelling; assignment or `detach()` is the
+route, and a deep eager edit goes through the top-level path write
+`endf_file['#0/3/2/xstable/E'] = ...`.
 
 ---
 
@@ -298,7 +310,7 @@ answered `False`.
 | assignment at material depth                             | `ValueError`             |
 | field assignment into a recipe-less (raw) section        | `TypeError`              |
 | field assignment into an absent section                  | `KeyError`               |
-| write yields a non-conformant section (eager mode)       | the writer's `EndfParserpyError` |
+| write yields a non-conformant section (eager mode)       | `SectionRenderError`     |
 | `del` at field depth (eager mode)                        | `ValueError`             |
 | mutating a frozen (eager-mode) view, at any depth        | `TypeError`              |
 
@@ -326,6 +338,14 @@ and the render-check.
     does `slot.overlay[(mf, mt)] = section` under the `EndfFile` lock.
   Both expose `detach()`, returning a recursively unwrapped plain
   `dict` / `list` deep copy.
+  * **`EndfPath` keys (P4)** — `_SectionView.__getitem__`/`__setitem__`/
+    `__delitem__`/`__contains__` first normalise the key: a `str` is turned
+    into an `EndfPath`. A single-component path resolves to the plain key and
+    takes the fast leaf path; a multi-component path is walked with
+    `EndfPath.get` / `.set` / `.exists` on the wrapped target and the result
+    re-wrapped. On a frozen view a multi-component `__setitem__` raises
+    `TypeError` like any other mutation; on a live view it walks to the parent
+    container, mutates it and calls `_touch()`.
 * A `_view(slot, mf, mt, section)` helper wraps a canonical section in the
   mode's view type. It is applied by the public accessors
   (`EndfFile.__getitem__`, `MaterialView.__getitem__`, `get`) and **skipped**
@@ -342,10 +362,15 @@ and the render-check.
   field → `ValueError` in eager mode, a dirty field-delete in deferred mode.
 * `__contains__` — resolve and probe, per §9.
 * `get` — relax the current `mf is None` guard to return `self[position]`.
-* **Render-check** — `_check_section(mf, mt, section)` calls
-  `self._parser.write({mf: {mt: section}})` for a mapping section and lets a
-  failure propagate. Eager `_set_slot_section` calls it; `verify()` calls it
-  for every dirty section and collects the failures into the report.
+* **Render-check** — `_check_section(mf, mt, section)` renders a mapping
+  section through `self._parser.write(...)`; any writer failure (a section
+  that does not conform to its ENDF recipe makes the writer raise — often a
+  bare `KeyError` for a missing field) is wrapped in a `SectionRenderError`
+  (a `TapeError`) with the writer's exception kept as its cause, so the eager
+  failure surface is a single typed, catchable error. Eager `_set_slot_section`
+  calls it; `verify()` calls it for every dirty section and collects the
+  `SectionRenderError`s into the report; deferred `save()` runs `verify()`
+  first and raises before writing anything if the report is non-empty.
 * The mode is stored as `self._check_edits` (validated against
   `("eager", "deferred")`, default `"eager"`).
 
@@ -376,7 +401,12 @@ Add to `tests/test_tape_query.py` (reads) and `tests/test_tape_editing.py`
   `del` is accepted; `verify()` reports a malformed dirty section and `save()`
   fails on it; two live views of one section observe each other's writes;
 * `detach()` on a live view yields a snapshot whose edits do not write
-  through.
+  through;
+* **`EndfPath` keys on a view** (P4): a multi-component string key reads the
+  same leaf as the chained-`[]` and the top-level path spellings; a bare key
+  still resolves unchanged; a path write through a live view writes through and
+  is rejected (`TypeError`) on a frozen view; a path read of an absent leaf
+  raises `KeyError`.
 
 ---
 
@@ -390,6 +420,12 @@ Add to `tests/test_tape_query.py` (reads) and `tests/test_tape_editing.py`
   always raises, like `dict.__getitem__`.
 * Slicing (`endf_file[1:3]`) is intentionally **not** added; `[]` accepts an
   `int` or a path only.
+* MF-level access (`endf_file["9237/3"]` yielding a `{MT: section}` handle) is
+  **not** added in v1. Unlike a section view, which wraps an already-parsed
+  in-memory object, an MF-level handle would have to lazily parse each MT from
+  disk — it is a slot-backed lazy view, closer to a `MaterialView` narrowed to
+  one MF than to the `_SectionView` wrappers. Deferred as a separate follow-up;
+  the depth table of §3 stays material / section / field.
 
 ---
 
@@ -403,4 +439,9 @@ navigated and edited like a path-addressable mapping; and that the
 whether an edit's recipe-conformity is verified immediately or only at
 `save()` / `verify()`, and whether a retrieved section is a read-only view or
 a live write-through view. A retrieved section is a recursive view over the
-tape; `.detach()` returns a standalone editable copy.
+tape and is itself path-addressable — a string key is read as an `EndfPath`
+relative to the view — so a tape is navigable and editable as a path-addressed
+mapping all the way down; `.detach()` returns a standalone editable copy. A new
+`SectionRenderError` (a `TapeError`) reports an edit that does not render to
+valid ENDF-6 text, and `EndfFile.verify()` renders every edited section and
+returns the non-conformant ones.

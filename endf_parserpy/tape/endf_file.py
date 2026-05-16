@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -38,15 +38,30 @@ from .address import (
     walk_section,
 )
 from .cache import _RawCache, _SectionCache, _Section
-from .errors import AmbiguousMaterialError, SectionParseError, StaleSourceError
+from .errors import (
+    AmbiguousMaterialError,
+    SectionParseError,
+    SectionRenderError,
+    StaleSourceError,
+)
 from .index import TapeIndex
 from .material import MaterialView, _MaterialSlot
 from .operations import write_tape
 from .splitter import _control_numbers
+from .views import (
+    _FrozenMapping,
+    _FrozenSequence,
+    _LiveMapping,
+    _LiveSequence,
+    _SectionView,
+    _navigate,
+    _plain,
+)
 
 
 _VALID_MODES = ("index", "load_raw", "parse_all")
 _VALID_ON_ERROR = ("raise", "mark")
+_VALID_CHECK_EDITS = ("eager", "deferred")
 _BACKEND_OF = {"EndfParserCpp": "cpp", "EndfParserPy": "python"}
 
 # sentinel distinguishing "no value given" from an explicit value of None
@@ -162,6 +177,15 @@ class EndfFile:
         Whether a section that fails to parse raises
         :class:`SectionParseError` or is returned as a
         :class:`FailedSection`.
+    check_edits : {"eager", "deferred"}
+        When the recipe-conformity of an edited section is checked.
+        ``"eager"`` (the default) renders every edited section through
+        the parser's writer immediately, so a malformed edit raises at
+        the offending assignment, and a retrieved section is a read-only
+        (frozen) view. ``"deferred"`` accepts every edit, marking the
+        section dirty, and checks conformity only at :meth:`save` or
+        :meth:`verify`; a retrieved section is then a live write-through
+        view.
     verify_source : bool
         If true, the file's size and mtime are checked against the
         index before every disk read; a change raises
@@ -177,6 +201,7 @@ class EndfFile:
         parsed_cache_bytes=64 << 20,
         raw_cache_bytes=64 << 20,
         on_error="mark",
+        check_edits="eager",
         verify_source=False,
     ):
         if mode not in _VALID_MODES:
@@ -185,10 +210,16 @@ class EndfFile:
             raise ValueError(
                 f"on_error must be one of {_VALID_ON_ERROR}, got {on_error!r}"
             )
+        if check_edits not in _VALID_CHECK_EDITS:
+            raise ValueError(
+                f"check_edits must be one of {_VALID_CHECK_EDITS}, got "
+                f"{check_edits!r}"
+            )
         self._path = os.fspath(filename)
         self._parser = parser or EndfParserFactory.create(select="fastest")
         self._backend = _BACKEND_OF.get(type(self._parser).__name__, "fastest")
         self._on_error = on_error
+        self._check_edits = check_edits
         self._verify_source = verify_source
         self._index = TapeIndex.from_file(self._path)
         self._materials = [
@@ -216,32 +247,133 @@ class EndfFile:
                     else:
                         self._get_raw(entry.position, mf, mt, entry.sections[(mf, mt)])
 
-    # -- mapping protocol over materials -------------------------------
+    # -- polymorphic item protocol -------------------------------------
+    #
+    # ``[]``, ``[]=``, ``del`` and ``in`` accept either an integer
+    # material position or an EndfMaterialPath (string or object). The
+    # path may stop at a material, a section or a field; see the design
+    # note docs/design/endf_file_path_addressing.md.
 
     def __len__(self):
         return len(self._materials)
 
-    def __getitem__(self, position):
-        if not isinstance(position, int):
-            raise TypeError(
-                "EndfFile is indexed by integer material position; use "
-                "by_mat() or by_za() for other lookups"
-            )
-        slot = self._materials[position]
+    def _material_view(self, slot):
+        """Return the (cached) :class:`MaterialView` of a slot."""
         view = self._material_views.get(slot)
         if view is None:
             view = MaterialView(self, slot)
             self._material_views[slot] = view
         return view
 
+    def _resolve_key(self, key):
+        """Resolve a path key to ``(position, mf, mt, subpath)``.
+
+        ``mf`` is ``None`` for a material-depth path; ``subpath`` is
+        ``None`` unless the path reaches into a section.
+        """
+        mp = key if isinstance(key, EndfMaterialPath) else EndfMaterialPath(key)
+        if mp.mf is not None and mp.mt is None:
+            raise ValueError(
+                f"{mp!r} addresses a whole MF file; MF-level addressing is "
+                "not supported -- address a section as material/MF/MT"
+            )
+        position = mp.resolve_material(_CurrentMaterials(self._materials))
+        return position, mp.mf, mp.mt, mp.subpath
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._material_view(self._materials[key])
+        if not isinstance(key, (str, EndfMaterialPath)):
+            raise TypeError(
+                "EndfFile is indexed by an integer material position or an "
+                "EndfMaterialPath (string or object); use by_mat() or "
+                "by_za() for other lookups"
+            )
+        position, mf, mt, subpath = self._resolve_key(key)
+        slot = self._materials[position]
+        if mf is None:
+            return self._material_view(slot)
+        section = self._get_slot_section(slot, mf, mt)
+        return self._view(slot, mf, mt, section, subpath)
+
+    def __setitem__(self, key, value):
+        if isinstance(key, int):
+            raise ValueError(
+                "a whole material cannot be assigned by position; use "
+                "append_material() to add a material"
+            )
+        if not isinstance(key, (str, EndfMaterialPath)):
+            raise TypeError(
+                "EndfFile is indexed by an integer material position or an "
+                "EndfMaterialPath (string or object)"
+            )
+        position, mf, mt, subpath = self._resolve_key(key)
+        slot = self._materials[position]
+        if mf is None:
+            raise ValueError(
+                "a whole material cannot be assigned; use append_material() "
+                "to add a material"
+            )
+        if subpath is None:
+            self._set_slot_section(slot, mf, mt, value)
+        else:
+            self._set_slot_field(slot, mf, mt, subpath, value)
+
+    def __delitem__(self, key):
+        """Delete the material, section or field addressed by ``key``."""
+        if isinstance(key, int):
+            with self._lock:
+                del self._materials[key]
+            return
+        if not isinstance(key, (str, EndfMaterialPath)):
+            raise TypeError(
+                "EndfFile is indexed by an integer material position or an "
+                "EndfMaterialPath (string or object)"
+            )
+        position, mf, mt, subpath = self._resolve_key(key)
+        slot = self._materials[position]
+        if mf is None:
+            with self._lock:
+                del self._materials[position]
+        elif subpath is None:
+            self._delete_slot_section(slot, mf, mt)
+        else:
+            self._delete_slot_field(slot, mf, mt, subpath)
+
+    def __contains__(self, key):
+        """Whether ``key`` resolves to a present material/section/field.
+
+        An ``int`` is tested as a material position. A malformed path or
+        an ambiguous bare-MAT selector is genuinely ill-posed and
+        propagates its :class:`ValueError` / :class:`AmbiguousMaterialError`
+        rather than being answered ``False``.
+        """
+        if isinstance(key, int):
+            return -len(self._materials) <= key < len(self._materials)
+        if not isinstance(key, (str, EndfMaterialPath)):
+            return False
+        try:
+            position, mf, mt, subpath = self._resolve_key(key)
+        except (KeyError, IndexError):
+            return False
+        slot = self._materials[position]
+        if mf is None:
+            return True
+        if (mf, mt) not in self._slot_section_keys_set(slot):
+            return False
+        if subpath is None:
+            return True
+        try:
+            section = self._get_slot_section(slot, mf, mt)
+        except KeyError:
+            return False
+        if not isinstance(section, Mapping):
+            return False
+        return section_has(section, subpath)
+
     def __iter__(self):
         for position in range(len(self._materials)):
-            yield self[position]
-
-    def __delitem__(self, position):
-        """Delete the material at ``position`` from the tape."""
-        with self._lock:
-            del self._materials[position]
+            yield self._material_view(self._materials[position])
 
     def materials(self):
         """Return all materials as a list of :class:`MaterialView` objects."""
@@ -339,23 +471,17 @@ class EndfFile:
     # -- path-based queries --------------------------------------------
 
     def get(self, path):
-        """Return the value addressed by an :class:`EndfMaterialPath`.
+        """Return the material, section or field addressed by ``path``.
 
         ``path`` is an :class:`EndfMaterialPath` or a string of the form
-        ``material/MF/MT[/field...]``. If the section cannot be parsed a
+        ``material[/MF/MT[/field...]]``. This is the explicit-method
+        synonym of ``endf_file[path]``: a material-depth path yields a
+        :class:`MaterialView`, a section-depth path a section view (see
+        :mod:`endf_parserpy.tape.views`) and a field-depth path the value
+        at that field. If the addressed section cannot be parsed a
         :class:`SectionParseError` is raised regardless of ``on_error``.
         """
-        mp = path if isinstance(path, EndfMaterialPath) else EndfMaterialPath(path)
-        if mp.mf is None or mp.mt is None:
-            raise ValueError(f"{mp!r} must address at least a section (material/MF/MT)")
-        position = mp.resolve_material(_CurrentMaterials(self._materials))
-        section = self._get_slot_section(self._materials[position], mp.mf, mp.mt)
-        if isinstance(section, FailedSection):
-            raise SectionParseError(
-                f"cannot resolve {mp!r}: MF={mp.mf}/MT={mp.mt} of the "
-                f"material at position {position} failed to parse"
-            ) from section.exception
-        return walk_section(section, mp.subpath)
+        return self[path]
 
     def build_index(self, section_path, *, name=None):
         """Build a secondary index over a section field.
@@ -460,13 +586,43 @@ class EndfFile:
         return self._get_section(slot.original_position, mf, mt)
 
     def _set_slot_section(self, slot, mf, mt, value):
+        if isinstance(value, _SectionView):
+            value = value.detach()
         if not isinstance(value, (Mapping, list)):
             raise TypeError(
                 "a section must be a mapping (parsed) or a list of strings (raw)"
             )
+        if self._check_edits == "eager":
+            self._check_section(mf, mt, value)
         with self._lock:
             slot.overlay[(mf, mt)] = value
             slot.deleted.discard((mf, mt))
+
+    def _set_slot_field(self, slot, mf, mt, subpath, value):
+        """Read-modify-write a single field within a section.
+
+        Under ``check_edits="eager"`` a deep copy of the section is
+        edited and render-checked before it is committed, so a malformed
+        result leaves the canonical section untouched. Under
+        ``"deferred"`` the canonical section is edited in place and
+        marked dirty.
+        """
+        if isinstance(value, _SectionView):
+            value = value.detach()
+        section = self._get_slot_section(slot, mf, mt)
+        self._require_mapping_section(section, mf, mt)
+        if self._check_edits == "eager":
+            work = _plain(section)
+            self._set_at(work, subpath, value)
+            self._check_section(mf, mt, work)
+            with self._lock:
+                slot.overlay[(mf, mt)] = work
+                slot.deleted.discard((mf, mt))
+        else:
+            with self._lock:
+                self._set_at(section, subpath, value)
+                slot.overlay[(mf, mt)] = section
+                slot.deleted.discard((mf, mt))
 
     def _delete_slot_section(self, slot, mf, mt):
         with self._lock:
@@ -478,6 +634,121 @@ class EndfFile:
                 and (mf, mt) in self._index[slot.original_position].sections
             ):
                 slot.deleted.add((mf, mt))
+
+    def _delete_slot_field(self, slot, mf, mt, subpath):
+        """Delete a single field within a section (deferred mode only)."""
+        if self._check_edits == "eager":
+            raise ValueError(
+                "deleting a section field is rejected in check_edits='eager' "
+                "mode because the resulting section no longer conforms to "
+                "its ENDF recipe; open the EndfFile with "
+                "check_edits='deferred', or assign a whole edited section"
+            )
+        section = self._get_slot_section(slot, mf, mt)
+        self._require_mapping_section(section, mf, mt)
+        with self._lock:
+            self._del_at(section, subpath)
+            slot.overlay[(mf, mt)] = section
+            slot.deleted.discard((mf, mt))
+
+    def _require_mapping_section(self, section, mf, mt):
+        """Raise unless ``section`` is a parsed (mapping) section."""
+        if isinstance(section, FailedSection):
+            raise SectionParseError(
+                f"MF={mf}/MT={mt} of the material at position "
+                f"{section.position} failed to parse"
+            ) from section.exception
+        if not isinstance(section, Mapping):
+            raise TypeError(
+                f"MF={mf}/MT={mt} is a recipe-less (raw) section; it has no "
+                "addressable fields"
+            )
+
+    @staticmethod
+    def _set_at(container, subpath, value):
+        parent, last = _navigate(container, subpath)
+        parent[last] = value
+
+    @staticmethod
+    def _del_at(container, subpath):
+        parent, last = _navigate(container, subpath)
+        del parent[last]
+
+    def _view(self, slot, mf, mt, section, subpath=None):
+        """Wrap a canonical section in the mode-dependent view.
+
+        ``check_edits="eager"`` yields a frozen (read-only) view,
+        ``"deferred"`` a live write-through view. A
+        :class:`FailedSection` raises :class:`SectionParseError`. With a
+        ``subpath`` the view is navigated to that field, returning a
+        nested view or a bare scalar.
+        """
+        if isinstance(section, FailedSection):
+            raise SectionParseError(
+                f"MF={mf}/MT={mt} of the material at position "
+                f"{section.position} failed to parse"
+            ) from section.exception
+        if self._check_edits == "deferred":
+
+            def touch(_slot=slot, _mf=mf, _mt=mt, _section=section):
+                with self._lock:
+                    _slot.overlay[(_mf, _mt)] = _section
+                    _slot.deleted.discard((_mf, _mt))
+
+            if isinstance(section, Mapping):
+                view = _LiveMapping(section, touch)
+            else:
+                view = _LiveSequence(section, touch)
+        else:
+            if isinstance(section, Mapping):
+                view = _FrozenMapping(section)
+            else:
+                view = _FrozenSequence(section)
+        if subpath is None:
+            return view
+        return view[subpath]
+
+    def _check_section(self, mf, mt, section):
+        """Render a section through the writer to check recipe conformity.
+
+        A render failure -- the section does not conform to its ENDF
+        recipe -- propagates. Only mapping sections are checked; a
+        recipe-less raw section is written verbatim and has no recipe to
+        violate.
+        """
+        if not isinstance(section, Mapping):
+            return
+        try:
+            self._parser.write({0: {0: [self._index.tpid_line]}, mf: {mt: section}})
+        except Exception as exc:
+            raise SectionRenderError(
+                f"the edited MF={mf}/MT={mt} section does not render to "
+                f"valid ENDF-6 text: {exc}"
+            ) from exc
+
+    def verify(self):
+        """Render every edited section and report the non-conformant ones.
+
+        Returns a list of ``(position, MF, MT, exception)`` tuples, one
+        per edited section that does not conform to its ENDF recipe; an
+        empty list means every edit is conformant. Untouched sections
+        are written verbatim and are not checked.
+
+        Under ``check_edits="deferred"`` this is the explicit conformity
+        check that :meth:`save` performs implicitly; under ``"eager"``
+        every edit was already checked at write time, so it is a near
+        no-op but remains harmless to call.
+        """
+        report = []
+        for position, slot in enumerate(self._materials):
+            for (mf, mt), section in list(slot.overlay.items()):
+                if not isinstance(section, Mapping):
+                    continue
+                try:
+                    self._check_section(mf, mt, section)
+                except SectionRenderError as exc:
+                    report.append((position, mf, mt, exc))
+        return report
 
     # -- the lazy access path ------------------------------------------
 
@@ -607,7 +878,23 @@ class EndfFile:
 
         Untouched sections are written verbatim from disk; edited and
         added sections are rendered by the parser.
+
+        Under ``check_edits="deferred"`` the edited sections are checked
+        for recipe conformity first (the implicit :meth:`verify`); a
+        non-conformant section raises :class:`SectionRenderError` before
+        anything is written. Under ``"eager"`` every edit was already
+        checked when it was made.
         """
+        if self._check_edits == "deferred":
+            report = self.verify()
+            if report:
+                position, mf, mt, exc = report[0]
+                raise SectionRenderError(
+                    f"cannot save: the edited MF={mf}/MT={mt} section of the "
+                    f"material at position {position} does not render to "
+                    f"valid ENDF-6 text ({len(report)} edited section(s) "
+                    "failed to render); call verify() for the full report"
+                ) from exc.__cause__
         materials = [self._assemble(slot) for slot in self._materials]
         if out is None:
             return write_tape(materials, parser=self._parser)
@@ -679,6 +966,7 @@ class EndfFile:
             "path": self._path,
             "backend": self._backend,
             "on_error": self._on_error,
+            "check_edits": self._check_edits,
             "verify_source": self._verify_source,
             "raw_cache_bytes": self._raw_cache.max_bytes,
             "parsed_cache_bytes": self._section_cache.max_bytes,
@@ -691,6 +979,7 @@ class EndfFile:
         self._backend = state["backend"]
         self._parser = EndfParserFactory.create(select=state["backend"])
         self._on_error = state["on_error"]
+        self._check_edits = state.get("check_edits", "eager")
         self._verify_source = state["verify_source"]
         self._index = state["index"]
         self._materials = state["materials"]
