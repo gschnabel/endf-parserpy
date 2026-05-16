@@ -6,6 +6,7 @@ from endf_parserpy import (
     parse_tape,
     parse_tape_file,
     iter_parse_tape,
+    iter_parse_tape_file,
     write_tape,
     write_tape_file,
     FailedMaterial,
@@ -214,6 +215,18 @@ def test_on_error_invalid_value(parser):
     multi, *_ = _make_multi(single, n=2)
     with pytest.raises(ValueError, match="on_error"):
         parse_tape(_text(multi), parser=parser, on_error="bogus")
+
+
+def test_iter_parse_tape_validates_eagerly(parser):
+    single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
+    multi, *_ = _make_multi(single, n=2)
+    # the call itself raises -- validation is not deferred to the first
+    # iteration of the returned generator
+    with pytest.raises(ValueError, match="on_error"):
+        iter_parse_tape(_text(multi), parser=parser, on_error="bogus")
+    # iter_parse_tape_file validates before it even opens the file
+    with pytest.raises(ValueError, match="on_error"):
+        iter_parse_tape_file("/no/such/tape.endf", parser=parser, on_error="bogus")
 
 
 def test_failed_material_roundtrips_verbatim(parser):

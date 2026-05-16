@@ -142,10 +142,15 @@ def iter_parse_tape(text, *, parser=None, exclude=None, include=None, on_error="
     Only one material is held in parsed form at a time, so the parsed
     data does not accumulate; for a tape too large to hold in memory at
     all, parse it from disk with :func:`iter_parse_tape_file`.
+
+    The arguments are validated when this function is called; the
+    returned iterator then yields the materials lazily.
     """
     _check_on_error(on_error)
     parser = _ensure_parser(parser)
-    yield from _iter_materials(text.splitlines(), parser, exclude, include, on_error)
+    # not a generator itself, so _check_on_error runs at the call rather
+    # than being deferred to the first iteration of the result
+    return _iter_materials(text.splitlines(), parser, exclude, include, on_error)
 
 
 def iter_parse_tape_file(
@@ -161,7 +166,14 @@ def iter_parse_tape_file(
     """
     _check_on_error(on_error)
     parser = _ensure_parser(parser)
-    with open(os.fspath(path), "r") as fh:
+    # validate eagerly (above), then delegate to the generator that
+    # holds the file open for the duration of the iteration
+    return _iter_parse_file(os.fspath(path), parser, exclude, include, on_error)
+
+
+def _iter_parse_file(path, parser, exclude, include, on_error):
+    """Generator backing :func:`iter_parse_tape_file`; holds the file open."""
+    with open(path, "r") as fh:
         yield from _iter_materials(fh, parser, exclude, include, on_error)
 
 

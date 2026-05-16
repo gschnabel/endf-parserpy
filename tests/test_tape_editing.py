@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 
 from endf_parserpy import EndfParserFactory, EndfFile
-from endf_parserpy.tape import SectionRenderError
+from endf_parserpy.tape import SectionRenderError, TapeStructureError
 
 
 TESTDATA = Path(__file__).parent / "testdata"
@@ -62,6 +62,40 @@ def test_export_to_file(tmp_path, parser):
     with pytest.raises(FileExistsError):
         endf_file.export(out)
     endf_file.export(out, overwrite=True)
+
+
+def test_export_cleans_up_temp_file_on_failure(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    target = tmp_path / "adir"
+    target.mkdir()  # a directory: the atomic replace onto it fails
+    with pytest.raises(OSError):
+        endf_file.export(target, overwrite=True)
+    # a failed export must not leave its temporary file behind
+    assert not (tmp_path / "adir.endfparserpy-tmp").exists()
+
+
+def test_export_empty_tape_is_rejected(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    del endf_file[0]
+    assert len(endf_file) == 0
+    # a tape with no materials has no TPID and is not valid ENDF
+    with pytest.raises(TapeStructureError, match="no materials"):
+        endf_file.export(tmp_path / "out.endf")
+    with pytest.raises(TapeStructureError, match="no materials"):
+        endf_file.to_string()
+
+
+def test_strip_send_only_strips_a_real_send():
+    # regression: only a genuine SEND (MF>0, MT=0) is stripped; an
+    # FEND/MEND/TEND record (also MT=0) must be left in place
+    from endf_parserpy.tape.endf_file import _strip_send
+
+    data = " " * 66 + "2925 3  2"  # a data record of MF=3/MT=2
+    send = " " * 66 + "2925 3  0"  # SEND  (MF=3,  MT=0)
+    fend = " " * 66 + "2925 0  0"  # FEND  (MF=0,  MT=0)
+    assert _strip_send([data, send]) == [data]
+    assert _strip_send([data, fend]) == [data, fend]
+    assert _strip_send([data]) == [data]
 
 
 def test_export_peak_memory_is_bounded(tmp_path, parser):

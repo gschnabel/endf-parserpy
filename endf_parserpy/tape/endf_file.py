@@ -45,6 +45,7 @@ from .errors import (
     SectionParseError,
     SectionRenderError,
     StaleSourceError,
+    TapeStructureError,
 )
 from .index import TapeIndex
 from .material import MaterialView, _MaterialSlot
@@ -88,9 +89,16 @@ def _strip_send(lines):
     The structural index spans a section through its SEND record, but
     the writer re-emits the SEND itself, so a raw section handed to the
     writer must not already carry one.
+
+    A SEND record is identified precisely, by MF>0 and MT=0; the
+    FEND/MEND/TEND records (which also have MT=0) are deliberately not
+    stripped, so a caller-supplied raw section is trimmed only when it
+    genuinely ends with its own SEND.
     """
-    if lines and _control_numbers(lines[-1])[2] == 0:
-        return lines[:-1]
+    if lines:
+        _, mf, mt = _control_numbers(lines[-1])
+        if mf > 0 and mt == 0:
+            return lines[:-1]
     return list(lines)
 
 
@@ -199,6 +207,15 @@ class EndfFile:
         If true, the file's size and mtime are checked against the
         index before every disk read; a change raises
         :class:`StaleSourceError`.
+
+    Notes
+    -----
+    An :class:`EndfFile` is not safe for concurrent use from several
+    threads. An internal lock keeps the section caches consistent and
+    serializes individual edits, but the material list and the
+    path-resolution, query and write-back operations are not guarded,
+    so a structural edit racing with any other access is undefined.
+    Use one :class:`EndfFile` per thread.
     """
 
     def __init__(
@@ -1033,6 +1050,20 @@ class EndfFile:
                 "invalid_edits() for the full report"
             ) from exc.__cause__
 
+    def _check_writable(self):
+        """Raise before output if there is nothing valid to write.
+
+        Render-checks the deferred edits and rejects a tape whose
+        materials have all been deleted -- a tape with no materials has
+        no TPID record and is not valid ENDF.
+        """
+        self._check_deferred_edits()
+        if not self._materials:
+            raise TapeStructureError(
+                "cannot write a tape with no materials; every material has "
+                "been deleted from this EndfFile"
+            )
+
     def _output_materials(self):
         """Yield each material assembled and ready for :func:`write_tape`.
 
@@ -1058,7 +1089,7 @@ class EndfFile:
         memory-bounded.
         """
         self._ensure_valid()
-        self._check_deferred_edits()
+        self._check_writable()
         with self._read_session():
             return write_tape(self._output_materials(), parser=self._parser)
 
@@ -1081,7 +1112,7 @@ class EndfFile:
         leaves the object usable.
         """
         self._ensure_valid()
-        self._check_deferred_edits()
+        self._check_writable()
         path = os.fspath(path)
         if os.path.exists(path) and not overwrite:
             raise FileExistsError(
@@ -1089,11 +1120,18 @@ class EndfFile:
             )
         onto_source = os.path.realpath(path) == os.path.realpath(self._path)
         tmp = path + ".endfparserpy-tmp"
-        with self._read_session():
-            write_tape_file(
-                self._output_materials(), tmp, parser=self._parser, overwrite=True
-            )
-        os.replace(tmp, path)
+        try:
+            with self._read_session():
+                write_tape_file(
+                    self._output_materials(), tmp, parser=self._parser, overwrite=True
+                )
+            os.replace(tmp, path)
+        except BaseException:
+            # a failed or interrupted write must not leave the temporary
+            # file behind (os.replace has consumed it on success)
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
         if onto_source:
             # the file the index describes has just been rewritten; the
             # offsets of untouched sections no longer match -- this object
