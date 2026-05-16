@@ -191,6 +191,29 @@ def test_set_section_type_validation(tmp_path, parser):
         endf_file[0][1, 451] = 42
 
 
+def test_section_assignment_rejects_invalid_keys(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    section = dict(endf_file[0][1, 451])
+    # MF 0 is the tape-head slot and MT 0 the SEND marker; assigning a
+    # section to either would corrupt the written tape
+    with pytest.raises(ValueError, match="MF=0/MT=0"):
+        endf_file[0][0, 0] = section
+    with pytest.raises(ValueError, match="not a valid section key"):
+        endf_file["#0/0/451"] = section
+    with pytest.raises(ValueError, match="not a valid section key"):
+        endf_file[0][3, 0] = section
+
+
+def test_append_material_skips_tape_head_entry(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    zn = parser.parse(_read_lines(ZN), exclude=RAW_EXCLUDE)
+    # an MF=0 tape-head entry is ignored whether its key is int or str
+    # (the str case would otherwise slip past the mf == 0 skip)
+    zn_with_head = {"0": {0: ["tape head"]}, **zn}
+    view = endf_file.append_material(zn_with_head, mat=3025)
+    assert (0, 0) not in view  # the MF=0 entry was not added as a section
+
+
 def test_malformed_section_path_raises_descriptive_error(tmp_path, parser):
     endf_file, _ = _open(tmp_path, parser, [CU])
     # a non-integer MF/MT in a material path gives a descriptive error,

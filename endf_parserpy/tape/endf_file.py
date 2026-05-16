@@ -507,10 +507,12 @@ class EndfFile:
             awr=None if awr is None else float(awr),
         )
         for mf, mtdic in material.items():
-            if mf == 0:
-                continue
+            mf_i = int(mf)
+            if mf_i == 0:
+                continue  # the MF=0 tape-head entry, if present, is ignored
             for mt, section in mtdic.items():
-                mf_mt = (int(mf), int(mt))
+                mf_mt = (mf_i, int(mt))
+                self._check_section_key(*mf_mt)
                 if isinstance(section, _SectionView):
                     section = section.detach()
                 if not isinstance(section, (Mapping, list)):
@@ -754,8 +756,23 @@ class EndfFile:
             raise KeyError(f"this material has no MF={mf}/MT={mt} section")
         return self._get_section(slot.original_position, mf, mt)
 
+    @staticmethod
+    def _check_section_key(mf, mt):
+        """Reject an ``(MF, MT)`` that cannot name a material section.
+
+        A material section has ``MF >= 1`` and ``MT >= 1``; ``MF 0`` is
+        the tape-head slot and ``MT 0`` marks a SEND record, so assigning
+        a section to either would corrupt the written tape.
+        """
+        if mf < 1 or mt < 1:
+            raise ValueError(
+                f"MF={mf}/MT={mt} is not a valid section key; a material "
+                "section has MF >= 1 and MT >= 1"
+            )
+
     def _set_slot_section(self, slot, mf, mt, value):
         self._ensure_valid()
+        self._check_section_key(mf, mt)
         if isinstance(value, _SectionView):
             value = value.detach()
         if not isinstance(value, (Mapping, list)):
