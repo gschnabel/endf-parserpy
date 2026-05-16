@@ -97,6 +97,13 @@ def test_split_materials_missing_tpid():
         list(split_materials([not_a_tpid]))
 
 
+def test_split_materials_rejects_tend_as_tpid():
+    # a TEND record has MF=0/MT=0 too, but MAT=-1 -- it must not be
+    # accepted as the tape head
+    with pytest.raises(TapeStructureError, match="MAT=-1"):
+        list(split_materials([TEND_LINE]))
+
+
 def test_split_materials_dangling_material():
     tpid = " " * 66 + "   1 0  0"
     record = " " * 66 + "1234 3  1"
@@ -264,6 +271,16 @@ def test_write_tape_verbatim_materials(parser):
     assert tape[1 : 1 + len(body)] == body  # first material, byte-for-byte
     assert tape[1 + len(body) : 1 + 2 * len(body)] == body  # second, the same
     assert len(parse_tape("\n".join(tape), parser=parser, exclude=RAW_EXCLUDE)) == 2
+
+
+def test_write_tape_empty_produces_valid_empty_tape(parser):
+    from endf_parserpy.tape.splitter import DEFAULT_TPID_LINE
+
+    tape = write_tape([], parser=parser)
+    # an empty material list yields a valid tape: a default TPID + TEND
+    assert tape.splitlines() == [DEFAULT_TPID_LINE, TEND_LINE]
+    # and it round-trips -- parsing it back yields no materials
+    assert parse_tape(tape, parser=parser) == []
 
 
 def test_write_tape_file_accepts_generator(parser, tmp_path):

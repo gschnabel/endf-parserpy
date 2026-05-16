@@ -205,12 +205,13 @@ def _scan(records):
     # the tape head (TPID) is the first non-blank record
     for byte_length, part in records:
         if part.strip():
+            mat = _control_int(part[_MAT_COLS])
             mf = _control_int(part[_MF_COLS])
             mt = _control_int(part[_MT_COLS])
-            if mf != 0 or mt != 0:
+            if mat < 0 or mf != 0 or mt != 0:
                 raise TapeStructureError(
                     "the tape does not begin with a tape head (TPID) "
-                    f"record (found MF={mf}, MT={mt})"
+                    f"record (found MAT={mat}, MF={mf}, MT={mt})"
                 )
             tpid = (part.rstrip(b"\r").decode("latin-1"), offset, byte_length)
             offset += byte_length
@@ -459,8 +460,12 @@ def _vec_scan_file(fh, chunk_bytes):
     if tpid_row and first[: tpid_row * line_width].strip():
         return None  # non-blank content before the TPID
     head = ctrl0[tpid_row].tobytes()
-    if _control_int(head[4:6]) != 0 or _control_int(head[6:9]) != 0:
-        return None  # does not begin with a TPID record
+    if (
+        _control_int(head[0:4]) < 0
+        or _control_int(head[4:6]) != 0
+        or _control_int(head[6:9]) != 0
+    ):
+        return None  # not a TPID record (a TEND has MAT=-1)
     tpid_offset = tpid_row * line_width
     tpid = (
         first[tpid_offset : tpid_offset + line_width].rstrip(b"\r\n").decode("latin-1"),

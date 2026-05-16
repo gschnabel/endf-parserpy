@@ -11,8 +11,9 @@ from endf_parserpy.tape import (
     AmbiguousMaterialError,
     SectionParseError,
     StaleSourceError,
+    TapeStructureError,
 )
-from endf_parserpy.tape.splitter import _control_numbers
+from endf_parserpy.tape.splitter import _control_numbers, TEND_LINE, DEFAULT_TPID_LINE
 
 
 TESTDATA = Path(__file__).parent / "testdata"
@@ -183,6 +184,22 @@ def test_mode_load_raw(tape_file, parser):
 def test_mode_parse_all(tape_file, parser):
     endf_file = EndfFile(tape_file, parser=parser, mode="parse_all")
     assert endf_file.cache_nbytes[1] > 0
+
+
+def test_open_a_valid_empty_tape(tmp_path, parser):
+    path = tmp_path / "empty.endf"
+    path.write_text(DEFAULT_TPID_LINE + "\n" + TEND_LINE + "\n")
+    endf_file = EndfFile(path, parser=parser)
+    assert len(endf_file) == 0
+
+
+def test_tape_starting_with_tend_is_rejected(tmp_path, parser):
+    # a TEND-only file has no TPID; the indexer must reject it rather
+    # than mistake the TEND record for the tape head
+    path = tmp_path / "tend_only.endf"
+    path.write_text(TEND_LINE + "\n")
+    with pytest.raises(TapeStructureError, match="MAT=-1"):
+        EndfFile(path, parser=parser)
 
 
 def test_invalid_mode_and_on_error(tape_file, parser):

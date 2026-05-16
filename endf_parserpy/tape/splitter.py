@@ -30,6 +30,12 @@ from .errors import TapeStructureError
 # parser, so no trailing sequence number is required.
 TEND_LINE = " " * 66 + "  -1 0  0"
 
+# A default tape head (TPID) record: a blank 66-column label followed by
+# MAT=1, MF=0, MT=0. Emitted when a tape is assembled from materials
+# that carry no TPID of their own, so that an assembled tape -- an empty
+# one included -- always begins with a valid TPID record.
+DEFAULT_TPID_LINE = " " * 66 + "   1 0  0"
+
 # The MAT/MF/MT control fields occupy fixed columns of every ENDF
 # record: MAT in columns 67-70, MF in 71-72 and MT in 73-75. These
 # zero-based byte slices are the single definition of that layout,
@@ -109,12 +115,12 @@ def split_materials(lines):
     if tpid is None:
         raise TapeStructureError("the tape does not contain any records")
 
-    _, mf, mt = _control_numbers(tpid)
-    if mf != 0 or mt != 0:
+    mat, mf, mt = _control_numbers(tpid)
+    if mat < 0 or mf != 0 or mt != 0:
         raise TapeStructureError(
             "the tape does not begin with a tape head (TPID) record "
-            f"(expected MF=0, MT=0 but found MF={mf}, MT={mt}); a "
-            "multi-material tape must start with a TPID record"
+            f"(found MAT={mat}, MF={mf}, MT={mt}); a multi-material tape "
+            "must start with a TPID record"
         )
 
     current = []

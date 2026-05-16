@@ -26,7 +26,7 @@ in-memory ENDF-6 string, the ``_file`` variant on a file path.
 import os
 
 from ..endf_parser_factory import EndfParserFactory
-from .splitter import split_materials, _control_numbers, TEND_LINE
+from .splitter import split_materials, _control_numbers, TEND_LINE, DEFAULT_TPID_LINE
 
 
 _VALID_ON_ERROR = ("raise", "mark")
@@ -249,11 +249,14 @@ def _material_lines(material, parser, exclude, include):
 def _iter_tape_chunks(materials, parser, exclude, include):
     """Yield a multi-material tape as text chunks, one material at a time.
 
-    The first chunk is the tape head (TPID), then comes one chunk per
-    material (its records through the MEND record), and the last chunk
-    is the tape end (TEND); every chunk ends with a newline. Each
-    material is written with an ordinary single-material parser and its
-    own per-material TPID/TEND records are stripped.
+    The first chunk is the tape head (TPID) -- the first material's own,
+    or :data:`~endf_parserpy.tape.splitter.DEFAULT_TPID_LINE` when no
+    material carries one (so an empty material list still yields a valid
+    TPID + TEND tape). Then comes one chunk per material (its records
+    through the MEND record), and the last chunk is the tape end (TEND);
+    every chunk ends with a newline. Each material is written with an
+    ordinary single-material parser and its own per-material TPID/TEND
+    records are stripped.
 
     ``materials`` is consumed lazily, so when it is a generator the
     whole tape is never held in memory at once.
@@ -267,11 +270,16 @@ def _iter_tape_chunks(materials, parser, exclude, include):
         if tend is not None:
             final_tend = tend
         lines, tpid = _strip_leading_tpid(lines)
-        if tpid is not None and not tpid_emitted:
-            yield tpid + "\n"
+        if not tpid_emitted:
+            # the assembled tape must open with a TPID: use the first
+            # material's own, or a default when it carries none
+            yield (tpid if tpid is not None else DEFAULT_TPID_LINE) + "\n"
             tpid_emitted = True
         if lines:
             yield "\n".join(lines) + "\n"
+    if not tpid_emitted:
+        # no materials at all -- still emit a valid (empty) tape
+        yield DEFAULT_TPID_LINE + "\n"
     yield (final_tend if final_tend is not None else TEND_LINE) + "\n"
 
 
