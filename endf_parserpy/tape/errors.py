@@ -51,7 +51,8 @@ class SectionRenderError(TapeError):
     through the parser's writer right away; a section that no longer
     conforms to its ENDF recipe makes the writer fail, which is reported
     as this error with the writer's own exception kept as its cause. The
-    same error is collected by :meth:`~endf_parserpy.EndfFile.verify`.
+    same error is collected by
+    :meth:`~endf_parserpy.EndfFile.invalid_edits`.
     """
 
 

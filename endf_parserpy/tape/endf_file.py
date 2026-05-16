@@ -193,8 +193,8 @@ class EndfFile:
         the offending assignment, and a retrieved section is a read-only
         (frozen) view. ``"deferred"`` accepts every edit, marking the
         section dirty, and checks conformity only at :meth:`export` /
-        :meth:`to_string` or :meth:`verify`; a retrieved section is then
-        a live write-through view.
+        :meth:`to_string` or :meth:`invalid_edits`; a retrieved section
+        is then a live write-through view.
     verify_source : bool
         If true, the file's size and mtime are checked against the
         index before every disk read; a change raises
@@ -800,19 +800,20 @@ class EndfFile:
                 f"valid ENDF-6 text: {exc}"
             ) from exc
 
-    def verify(self):
-        """Render every edited section and report the non-conformant ones.
+    def invalid_edits(self):
+        """Return the edited sections that do not conform to their recipe.
 
-        Returns a list of ``(position, MF, MT, exception)`` tuples, one
-        per edited section that does not conform to its ENDF recipe; an
-        empty list means every edit is conformant. Untouched sections
-        are written verbatim and are not checked.
+        Renders every edited section through the parser's writer and
+        returns a list of ``(position, MF, MT, exception)`` tuples, one
+        per edited section that fails to render; an empty list means
+        every edit is conformant, so ``if not endf_file.invalid_edits()``
+        reads as "every edit is valid". Untouched sections are written
+        verbatim and are not checked.
 
         Under ``check_edits="deferred"`` this is the explicit conformity
         check that :meth:`export` and :meth:`to_string` perform
-        implicitly; under ``"eager"``
-        every edit was already checked at write time, so it is a near
-        no-op but remains harmless to call.
+        implicitly; under ``"eager"`` every edit was already checked at
+        write time, so it is a near no-op but remains harmless to call.
         """
         report = []
         for position, slot in enumerate(self._materials):
@@ -949,20 +950,20 @@ class EndfFile:
 
         Shared by :meth:`to_string` and :meth:`export`. Under
         ``check_edits="deferred"`` the edited sections are render-checked
-        first (the implicit :meth:`verify`); a non-conformant section
-        raises :class:`SectionRenderError` before anything is produced.
-        Under ``"eager"`` every edit was already checked when it was
-        made.
+        first (the implicit :meth:`invalid_edits`); a non-conformant
+        section raises :class:`SectionRenderError` before anything is
+        produced. Under ``"eager"`` every edit was already checked when
+        it was made.
         """
         if self._check_edits == "deferred":
-            report = self.verify()
+            report = self.invalid_edits()
             if report:
                 position, mf, mt, exc = report[0]
                 raise SectionRenderError(
                     f"the edited MF={mf}/MT={mt} section of the material at "
                     f"position {position} does not render to valid ENDF-6 "
                     f"text ({len(report)} edited section(s) failed to "
-                    "render); call verify() for the full report"
+                    "render); call invalid_edits() for the full report"
                 ) from exc.__cause__
         return [self._assemble(slot) for slot in self._materials]
 

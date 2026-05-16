@@ -251,10 +251,10 @@ def test_deferred_two_views_share_state(tmp_path, parser):
     assert view_b["AWR"] == 33.0
 
 
-def test_deferred_field_delete_then_verify(tmp_path, parser):
+def test_deferred_field_delete_then_invalid_edits(tmp_path, parser):
     endf_file = _open(tmp_path, parser, [CU], check_edits="deferred")
     del endf_file["#0/3/2/AWR"]  # accepted, leaves the section non-conformant
-    report = endf_file.verify()
+    report = endf_file.invalid_edits()
     assert len(report) == 1
     position, mf, mt, exc = report[0]
     assert (position, mf, mt) == (0, 3, 2)

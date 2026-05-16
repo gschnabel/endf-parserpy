@@ -5,12 +5,13 @@ Branch: `feature/multi-material-lazy-tape`
 Builds on: `multi_material_lazy_tape.md` (Phases 1–5, implemented)
 Target version: additive feature on the still-unreleased tape API.
 
-> **Note (post-implementation):** the tape serialization API was
-> subsequently renamed. `EndfFile.save()` was split into
-> `EndfFile.export(path)` (write a file) and `EndfFile.to_string()`
-> (return an ENDF-6 string); the module functions gained `_file`
-> variants. Mentions of `save()` below predate that rename and should
-> be read as `export()` / `to_string()`.
+> **Note (post-implementation):** the tape API was subsequently
+> renamed. `EndfFile.save()` was split into `EndfFile.export(path)`
+> (write a file) and `EndfFile.to_string()` (return an ENDF-6 string);
+> the module functions gained `_file` variants; and `EndfFile.verify()`
+> became `EndfFile.invalid_edits()` (it returns the list of
+> non-conformant edited sections). Mentions of `save()` and `verify()`
+> below predate those renames.
 
 ---
 

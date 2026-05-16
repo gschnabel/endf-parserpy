@@ -379,12 +379,14 @@ With ``check_edits='deferred'`` a retrieved section is instead a
 *live* view: assigning into it writes straight through to the
 tape, exactly as for an :class:`~endf_parserpy.EndfDict`.
 Recipe-conformity is then checked only when the tape is written
-out, or on demand via :meth:`~endf_parserpy.EndfFile.verify`:
+out, or on demand via :meth:`~endf_parserpy.EndfFile.invalid_edits`,
+which returns the edited sections that fail to render:
 
 .. code:: Python
 
    relaxed['#0/3/2']['QI'] = 0.0         # writes through to the tape
-   report = relaxed.verify()             # [] if every edit is conformant
+   if not relaxed.invalid_edits():       # empty list -> every edit is valid
+       ...
 
 A view — frozen or live — is itself path-addressable: a string
 key is read as an :class:`~endf_parserpy.EndfPath` relative to

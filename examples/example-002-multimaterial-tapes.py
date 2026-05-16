@@ -184,10 +184,11 @@ endf_file.reorder([0, 1, 4, 2, 3])
 order = [(m.position, m.mat) for m in endf_file]
 print(f"  reorder         -> (position, MAT) = {order}")
 
-# verify() render-checks every edited section against its ENDF recipe
-# and reports the non-conformant ones; an empty list means all is well.
-report = endf_file.verify()
-print(f"  verify()        -> {len(report)} non-conformant section(s)")
+# invalid_edits() render-checks every edited section against its ENDF
+# recipe and returns the non-conformant ones; an empty list means all
+# edits are valid, so "if not endf_file.invalid_edits()" reads as ok.
+report = endf_file.invalid_edits()
+print(f"  invalid_edits() -> {len(report)} non-conformant section(s)")
 
 # export() writes the edited tape to a file; to_string() returns it as
 # an ENDF-6 string instead.
