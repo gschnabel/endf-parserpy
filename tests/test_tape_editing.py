@@ -245,6 +245,31 @@ def test_delete_material_drops_cached_view(tmp_path, parser):
     assert len(endf_file._material_views) == 1
 
 
+def test_by_za_none_selects_unknown_za_only(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])  # CU has a known ZA
+    zn = parser.parse(_read_lines(ZN), exclude=RAW_EXCLUDE)
+    endf_file.append_material(zn, mat=3025)  # no za= given -> za is None
+    selected = endf_file.by_za(None)
+    # by_za(None) selects only the material with unknown ZA, not every
+    # material (None must not be read as "no filter")
+    assert [v.position for v in selected] == [1]
+
+
+def test_live_sequence_slice_is_a_detached_copy():
+    # regression: slicing a live sequence view must return a detached
+    # plain copy, not a write-through view over a throwaway slice
+    from endf_parserpy.tape.views import _LiveSequence
+
+    target = [{"x": 1}, {"x": 2}, {"x": 3}]
+    view = _LiveSequence(target, lambda: None)
+    piece = view[0:2]
+    assert piece == [{"x": 1}, {"x": 2}]
+    assert isinstance(piece, list) and not isinstance(piece, _LiveSequence)
+    # mutating the slice must not reach the canonical section
+    piece[0]["x"] = 999
+    assert target[0]["x"] == 1
+
+
 def test_reorder(tmp_path, parser):
     endf_file, _ = _open(tmp_path, parser, [CU, ZN])
     mat0, mat1 = endf_file[0].mat, endf_file[1].mat

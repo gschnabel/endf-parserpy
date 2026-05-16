@@ -229,7 +229,10 @@ class _LiveSequence(_SectionView, MutableSequence):
 
     def __getitem__(self, key):
         if isinstance(key, slice):
-            return self._wrap(self._target[key])
+            # a slice is a new list and cannot write through; return a
+            # detached plain copy, mirroring ordinary list slicing,
+            # rather than a live view that would silently drop edits
+            return _plain(self._target[key])
         cur, last = _navigate(self._target, key)
         return self._wrap(cur[last])
 

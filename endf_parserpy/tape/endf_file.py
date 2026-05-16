@@ -540,16 +540,19 @@ class EndfFile:
 
     # -- secondary lookups ---------------------------------------------
 
-    def _positions(self, *, mat=None, za=None):
+    def _positions(self, *, mat=_UNSET, za=_UNSET):
         """Tape positions of the materials matching every given criterion.
 
-        The single structural-filter loop behind :meth:`by_mat`,
-        :meth:`by_za` and :meth:`find`.
+        A criterion left as ``_UNSET`` is not applied; ``None`` is
+        treated as an ordinary value to match, so ``by_za(None)``
+        selects the materials whose ZA is unknown. This is the single
+        structural-filter loop behind :meth:`by_mat`, :meth:`by_za` and
+        :meth:`find`.
         """
         return [
             i
             for i, s in enumerate(self._materials)
-            if (mat is None or s.mat == mat) and (za is None or s.za == za)
+            if (mat is _UNSET or s.mat == mat) and (za is _UNSET or s.za == za)
         ]
 
     def by_mat(self, mat, *, occurrence=None):
@@ -580,11 +583,17 @@ class EndfFile:
     def find(self, *, mat=None, za=None):
         """Return a list of materials matching every given criterion.
 
-        This is the structural lookup. For lookups by a parsed section
-        field, see :meth:`query`.
+        This is the structural lookup; a criterion left as ``None`` is
+        not applied. For lookups by a parsed section field, see
+        :meth:`query`.
         """
         self._ensure_valid()
-        return [self[i] for i in self._positions(mat=mat, za=za)]
+        criteria = {}
+        if mat is not None:
+            criteria["mat"] = mat
+        if za is not None:
+            criteria["za"] = za
+        return [self[i] for i in self._positions(**criteria)]
 
     # -- path-based queries --------------------------------------------
 
@@ -1019,9 +1028,10 @@ class EndfFile:
         for mf, mt in self._slot_section_keys(slot):
             if (mf, mt) in slot.overlay:
                 section = slot.overlay[(mf, mt)]
-                if isinstance(section, FailedSection):
-                    section = _strip_send(section.raw_lines)
-                elif isinstance(section, list):
+                # an overlay section is always a parsed mapping or a raw
+                # list of lines; a raw list is stripped of any trailing
+                # SEND so the writer can re-emit it
+                if isinstance(section, list):
                     section = _strip_send(section)
             else:
                 sec_entry = self._index[slot.original_position].sections[(mf, mt)]
@@ -1128,9 +1138,12 @@ class EndfFile:
             os.replace(tmp, path)
         except BaseException:
             # a failed or interrupted write must not leave the temporary
-            # file behind (os.replace has consumed it on success)
-            if os.path.exists(tmp):
+            # file behind (os.replace has consumed it on success); a
+            # cleanup failure must not mask the original error
+            try:
                 os.remove(tmp)
+            except OSError:
+                pass
             raise
         if onto_source:
             # the file the index describes has just been rewritten; the
