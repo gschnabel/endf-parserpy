@@ -23,33 +23,83 @@ material:
 .. code:: Python
 
    from endf_parserpy import parse_tape
-   materials = parse_tape('tape.endf')
+   materials = parse_tape('tape.endf')   # a list, one entry per material
+   len(materials)                        # number of materials on the tape
 
 The argument can be a file path or a list of strings with
-ENDF-6 formatted data. Each entry is an ordinary dictionary,
-identical to what the :func:`~endf_parserpy.EndfParserPy.parsefile`
-method returns for a single-material file, and can be accessed
-and modified in the same way, unless that material failed to
-parse (see below). As for
-:func:`~endf_parserpy.EndfParserPy.parsefile`, the ``include``
-and ``exclude`` arguments restrict parsing to parts of each
-material.
+ENDF-6 formatted data. Each entry of the list is an ordinary
+dictionary, identical to what the
+:func:`~endf_parserpy.EndfParserPy.parsefile` method returns
+for a single-material file, and is therefore indexed by MF
+and then by MT number:
+
+.. code:: Python
+
+   material = materials[0]      # the first material, a dict
+   section = material[3][2]     # its MF=3/MT=2 section, also a dict
+   section['AWR']               # a field of that section
+
+As for :func:`~endf_parserpy.EndfParserPy.parsefile`, the
+``include`` and ``exclude`` arguments restrict parsing to
+parts of each material; sections that are not parsed are
+kept as lists of raw strings:
+
+.. code:: Python
+
+   # parse only MF=3 of every material, keep the rest as raw text
+   materials = parse_tape('tape.endf', include=[3])
+
+Because each material is an ordinary dictionary, modifying the
+data before writing it back is a plain assignment. To change,
+for instance, the atomic weight ratio in the MF1/MT451 section
+of the first material:
+
+.. code:: Python
+
+   materials[0][1][451]['AWR'] = 63.5   # modify a value in place
+
+The :ref:`guide on ENDF-6 file plumbing <endf6_file_plumbing_sec>`
+covers modifying, adding and deleting data in more depth; the
+same operations apply to every material of a tape.
 
 The companion function :func:`~endf_parserpy.write_tape`
-performs the reverse operation:
+performs the reverse operation. Given a path, it writes the
+tape to that file; without a path, it returns the assembled
+ENDF-6 lines as a list of strings:
 
 .. code:: Python
 
    from endf_parserpy import write_tape
-   write_tape(materials, 'output.endf')
+   write_tape(materials, 'output.endf')      # write to a file
+   lines = write_tape(materials)             # or obtain the lines
 
 If a material cannot be parsed, the ``on_error`` argument
-determines what happens. With the default ``'mark'``, the
+decides what happens. With the default ``'mark'``, the
 offending material is returned as a
-:class:`~endf_parserpy.FailedMaterial` object that preserves
-its raw content, so that the remaining materials are still
-parsed and the tape can be written back without loss. With
-``on_error='raise'``, the first failure aborts the operation.
+:class:`~endf_parserpy.FailedMaterial` object instead of a
+dictionary. It keeps the raw content of the material, so the
+remaining materials are still parsed and the tape can be
+written back without loss:
+
+.. code:: Python
+
+   from endf_parserpy import FailedMaterial
+
+   materials = parse_tape('tape.endf')   # on_error='mark' is the default
+   for material in materials:
+       if isinstance(material, FailedMaterial):
+           # .mat is the MAT number, .exception the error that
+           # occurred and .raw_lines the original text of the material
+           print(material.mat, material.exception)
+       else:
+           ...   # an ordinary material dictionary
+
+With ``on_error='raise'`` the first failure aborts the
+operation instead:
+
+.. code:: Python
+
+   materials = parse_tape('tape.endf', on_error='raise')
 
 For large tapes, the :func:`~endf_parserpy.iter_parse_tape`
 function yields one material at a time instead of returning
@@ -60,7 +110,7 @@ bounded by the size of the largest material:
 
    from endf_parserpy import iter_parse_tape
    for material in iter_parse_tape('tape.endf'):
-       ...   # process one material
+       ...   # one material, a dict or a FailedMaterial
 
 Lazy access with EndfFile
 -------------------------
@@ -75,38 +125,105 @@ disk only when it is accessed:
 
    from endf_parserpy import EndfFile
    endf_file = EndfFile('tape.endf')
-   print(len(endf_file))        # number of materials on the tape
+   len(endf_file)                # number of materials on the tape
 
 A material is addressed by its zero-based position on the
-tape and an MF/MT section by an ``(MF, MT)`` pair:
+tape. Indexing an :class:`~endf_parserpy.EndfFile` returns a
+:class:`~endf_parserpy.tape.MaterialView` — a lightweight
+handle to one material — and iterating over the file yields
+these handles in turn:
 
 .. code:: Python
 
-   material = endf_file[0]      # the first material
-   section = material[3, 2]     # its parsed MF=3/MT=2 section
+   material = endf_file[0]            # a MaterialView
+   for material in endf_file:         # iterate over all materials
+       print(material.position, material.mat, material.za)
+
+Besides ``position``, ``mat``, ``za`` and ``awr``, a
+:class:`~endf_parserpy.tape.MaterialView` reports the
+sections the material contains:
+
+.. code:: Python
+
+   material.sections()        # list of the (MF, MT) pairs present
+
+A section is addressed on a material by an ``(MF, MT)`` pair.
+Accessing it parses that section and returns it as a
+dictionary; a section for which no recipe exists is returned
+as a list of raw strings instead:
+
+.. code:: Python
+
+   section = endf_file[0][3, 2]       # parsed MF=3/MT=2 section, a dict
 
 Because the same material number (``MAT``) may occur several
 times on a tape — a PENDF tape repeats it for every
 temperature — materials are identified by position rather
-than by ``MAT``. The :meth:`~endf_parserpy.EndfFile.by_mat`
-and :meth:`~endf_parserpy.EndfFile.by_za` methods return the
-positions that match a given ``MAT`` or ``ZA`` number.
-
-Sections can be replaced, added or deleted, and the edited
-tape written back with the :meth:`~endf_parserpy.EndfFile.save`
-method:
+than by ``MAT``. The :meth:`~endf_parserpy.EndfFile.by_mat`,
+:meth:`~endf_parserpy.EndfFile.by_za` and
+:meth:`~endf_parserpy.EndfFile.find` methods look materials
+up by their identifiers:
 
 .. code:: Python
 
-   material[3, 2] = section     # replace a section
-   del material[3, 18]          # delete a section
-   endf_file.save('edited.endf')
+   material = endf_file.by_mat(2925)     # the single material with MAT 2925
+   materials = endf_file.by_za(29063)    # a list of materials with that ZA
+   materials = endf_file.find(mat=2925)  # a list matching every criterion
 
-Sections that were not edited are written back verbatim, so
-an unedited tape is reproduced byte for byte. Whole materials
-can likewise be deleted, appended with
-:meth:`~endf_parserpy.EndfFile.append_material` or reordered
-with :meth:`~endf_parserpy.EndfFile.reorder`.
+:meth:`~endf_parserpy.EndfFile.by_mat` returns a single
+:class:`~endf_parserpy.tape.MaterialView`, whereas
+:meth:`~endf_parserpy.EndfFile.by_za` and
+:meth:`~endf_parserpy.EndfFile.find` return a list of them.
+If the ``MAT`` number is not unique,
+:meth:`~endf_parserpy.EndfFile.by_mat` raises
+:class:`~endf_parserpy.tape.AmbiguousMaterialError`, and the
+copy of interest must then be selected with the
+``occurrence`` argument:
+
+.. code:: Python
+
+   material = endf_file.by_mat(2925, occurrence=0)   # the first such material
+
+The sections of a material can be replaced, added or
+deleted, and whole materials can be deleted, appended or
+reordered. Every edit is kept in memory until the tape is
+written back:
+
+.. code:: Python
+
+   endf_file[0][3, 2] = section          # replace (or add) a section
+   del endf_file[0][3, 18]               # delete a section
+   del endf_file[1]                      # delete the second material
+
+A new material — an ordinary ``{MF: {MT: section}}`` mapping,
+such as one entry of a :func:`~endf_parserpy.parse_tape`
+result — is appended with
+:meth:`~endf_parserpy.EndfFile.append_material`, which
+returns a :class:`~endf_parserpy.tape.MaterialView` of the
+added material:
+
+.. code:: Python
+
+   donor = parse_tape('other.endf')[0]                 # a material dictionary
+   new_material = endf_file.append_material(donor, mat=9999)
+
+The materials can be reordered by passing a permutation of
+their positions to :meth:`~endf_parserpy.EndfFile.reorder`:
+
+.. code:: Python
+
+   endf_file.reorder([1, 0])             # swap the first two materials
+
+Finally, :meth:`~endf_parserpy.EndfFile.save` writes the
+edited tape. As for :func:`~endf_parserpy.write_tape`, a path
+writes the file and ``out=None`` returns the lines. Sections
+that were not edited are written back verbatim, so an
+unedited tape is reproduced byte for byte:
+
+.. code:: Python
+
+   endf_file.save('edited.endf')                 # write to a new file
+   endf_file.save('tape.endf', overwrite=True)   # or overwrite the source
 
 .. note::
 
@@ -125,7 +242,8 @@ A PENDF tape, for example, stores the same material at a
 series of temperatures, and one usually wants the copy at a
 specific temperature. The :meth:`~endf_parserpy.EndfFile.query`
 method selects materials by the value of a field in one of
-their sections:
+their sections and returns the matches as a list of
+:class:`~endf_parserpy.tape.MaterialView` objects:
 
 .. code:: Python
 
@@ -136,20 +254,29 @@ their sections:
 
    # the materials whose MF1/MT451 temperature is 293.6 K
    room_temp = endf_file.query('1/451/TEMP', 293.6, tol=1.0)
+   xs = room_temp[0][3, 1]      # MF=3/MT=1 of the first match
 
 The first argument is a path into an MF/MT section — here the
 ``TEMP`` field of the MF1/MT451 section — and the second the
 value to match; the ``tol`` argument allows for a numerical
-tolerance. The method returns the matching materials, which
-can then be accessed as usual:
+tolerance. Instead of a value, a ``predicate`` callable can
+be supplied to match on an arbitrary condition:
 
 .. code:: Python
 
-   xs = room_temp[0][3, 1]      # MF=3/MT=1 at 293.6 K
+   hot = endf_file.query('1/451/TEMP', predicate=lambda t: t > 1000.0)
 
-If the same query is needed repeatedly, the
-:meth:`~endf_parserpy.EndfFile.build_index` method builds a
-reusable mapping from field values to material positions.
+If the same lookup is needed repeatedly, the
+:meth:`~endf_parserpy.EndfFile.build_index` method parses the
+section once per material and returns a dictionary that maps
+each field value to the list of material positions carrying
+it:
+
+.. code:: Python
+
+   temperatures = endf_file.build_index('1/451/TEMP')
+   # e.g. {293.6: [0, 3], 600.0: [1, 4], ...}
+   positions = temperatures[293.6]
 
 A single value can also be retrieved directly with the
 :meth:`~endf_parserpy.EndfFile.get` method and a
@@ -162,4 +289,10 @@ for the material at position ``k``:
 
 .. code:: Python
 
-   awr = endf_file.get('#0/1/451/AWR')
+   endf_file.get('#0/1/451/AWR')        # AWR of the material at position 0
+   endf_file.get('2925/3/2')            # the whole MF=3/MT=2 section of MAT 2925
+   endf_file.get('2925#1/1/451/TEMP')   # a field of the 2nd MAT-2925 material
+
+The path may stop at a section, in which case the whole
+section is returned, or continue into it to address a single
+field.

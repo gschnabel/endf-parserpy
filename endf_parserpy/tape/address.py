@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -38,11 +38,33 @@ from .errors import AmbiguousMaterialError
 class EndfMaterialPath:
     """A material selector followed by an :class:`EndfPath`.
 
+    A material-qualified path has the form ``material/MF/MT/field...``.
+    The leading *material selector* picks one material of a tape, and
+    the remaining ``/MF/MT/field...`` part is an ordinary
+    :class:`EndfPath` addressing data within that material. That part
+    may be truncated: a path may stop at the material, at a section
+    (``material/MF/MT``), or reach down to an individual field.
+
+    The material selector takes one of three forms:
+
+    - ``MAT`` selects the material with the given MAT number, e.g.
+      ``2925``. Resolving this form fails with an
+      :class:`~endf_parserpy.tape.AmbiguousMaterialError` when the MAT
+      number is not unique, as it is on a PENDF tape.
+    - ``MAT#k`` selects the ``k``-th material carrying that MAT number,
+      e.g. ``9237#1``. This disambiguates a repeated MAT number; the
+      index ``k`` is zero-based, so ``9237#0`` is the first occurrence.
+    - ``#k`` selects the material at tape position ``k``, e.g. ``#0``
+      for the first material on the tape. The index ``k`` is zero-based.
+
     Parameters
     ----------
     pathspec : str or EndfMaterialPath
-        The path, e.g. ``"9237#1/3/2/TEMP"``, ``"#0/1/451"`` or
-        ``"2925/3/1"``.
+        The path. For example, ``"9237#1/3/2/TEMP"`` addresses the
+        ``TEMP`` field of the MF=3/MT=2 section of the second material
+        with MAT 9237, ``"#0/1/451"`` the whole MF=1/MT=451 section of
+        the first material on the tape, and ``"2925/3/1"`` the
+        MF=3/MT=1 section of the material with MAT 2925.
 
     Attributes
     ----------
