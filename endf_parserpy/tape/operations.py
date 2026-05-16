@@ -32,7 +32,28 @@ from .splitter import split_materials, _control_numbers, TEND_LINE
 _VALID_ON_ERROR = ("raise", "mark")
 
 
-class FailedMaterial:
+class _FailedUnit:
+    """Base for the placeholders of ENDF data that could not be parsed.
+
+    Holds the triggering ``exception`` and the ``raw_lines`` of the
+    unit; keeping the original text lets the unit be written back
+    verbatim. Subclassed by :class:`FailedMaterial` (a whole material)
+    and by the internal ``FailedSection`` (a single MF/MT section).
+
+    Attributes
+    ----------
+    exception : Exception
+        The exception raised while parsing the unit.
+    raw_lines : list[str]
+        The raw ENDF-6 text of the unit.
+    """
+
+    def __init__(self, exception, raw_lines):
+        self.exception = exception
+        self.raw_lines = list(raw_lines)
+
+
+class FailedMaterial(_FailedUnit):
     """Placeholder for a material that could not be parsed.
 
     Returned by :func:`parse_tape` and :func:`iter_parse_tape` (and
@@ -48,10 +69,6 @@ class FailedMaterial:
     raw_lines : list[str]
         The lines of the single-material tape that failed to parse.
     """
-
-    def __init__(self, exception, raw_lines):
-        self.exception = exception
-        self.raw_lines = list(raw_lines)
 
     @property
     def mat(self):

@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -30,6 +30,28 @@ from .errors import TapeStructureError
 # parser, so no trailing sequence number is required.
 TEND_LINE = " " * 66 + "  -1 0  0"
 
+# The MAT/MF/MT control fields occupy fixed columns of every ENDF
+# record: MAT in columns 67-70, MF in 71-72 and MT in 73-75. These
+# zero-based byte slices are the single definition of that layout,
+# used here and by the structural scanner in index.py.
+_MAT_COLS = slice(66, 70)
+_MF_COLS = slice(70, 72)
+_MT_COLS = slice(72, 75)
+_CTRL_COLS = slice(66, 75)
+
+
+def _control_int(field):
+    """Parse an integer from a MAT/MF/MT control field.
+
+    A blank or non-numeric field reads as zero, consistent with the
+    ENDF convention for blank control fields. Accepts ``str`` or
+    ``bytes`` -- ``int()`` handles both and strips surrounding spaces.
+    """
+    try:
+        return int(field)
+    except ValueError:
+        return 0
+
 
 def _control_numbers(line):
     """Return the ``(MAT, MF, MT)`` integers of an ENDF line.
@@ -39,14 +61,11 @@ def _control_numbers(line):
     zero, consistent with how blank control fields are treated
     throughout ENDF-6.
     """
-
-    def _field(text):
-        try:
-            return int(text)
-        except ValueError:
-            return 0
-
-    return _field(line[66:70]), _field(line[70:72]), _field(line[72:75])
+    return (
+        _control_int(line[_MAT_COLS]),
+        _control_int(line[_MF_COLS]),
+        _control_int(line[_MT_COLS]),
+    )
 
 
 def split_materials(lines):

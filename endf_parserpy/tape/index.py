@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 from .errors import TapeStructureError
+from .splitter import _control_int, _MAT_COLS, _MF_COLS, _MT_COLS, _CTRL_COLS
 
 try:
     import numpy as _np
@@ -54,6 +55,10 @@ def _endf_float(field_text):
     ENDF numbers may use an implicit exponent, e.g. ``9.223800+4`` for
     ``9.223800e+4``. ``None`` is returned rather than raising, so that
     an unparsable identifier field never aborts an index build.
+
+    This is a deliberately minimal number parser, kept independent of
+    the parsing engine so the index stays recipe- and engine-free; it
+    only needs to recover the ZA/AWR identifiers from a HEAD record.
     """
     text = field_text.strip()
     if text == "":
@@ -136,21 +141,6 @@ class MaterialIndexEntry:
     sections: Dict[Tuple[int, int], SectionIndexEntry] = field(default_factory=dict)
 
 
-def _fast_int(field):
-    """Parse an integer from a byte control field.
-
-    A blank or non-numeric field reads as zero, consistent with the
-    ENDF convention for blank control fields.
-    """
-    field = field.strip()
-    if not field:
-        return 0
-    try:
-        return int(field)
-    except ValueError:
-        return 0
-
-
 def _iter_file_records(fh):
     """Yield ``(byte_length, line)`` for each record of a binary file.
 
@@ -215,8 +205,8 @@ def _scan(records):
     # the tape head (TPID) is the first non-blank record
     for byte_length, part in records:
         if part.strip():
-            mf = _fast_int(part[70:72])
-            mt = _fast_int(part[72:75])
+            mf = _control_int(part[_MF_COLS])
+            mt = _control_int(part[_MT_COLS])
             if mf != 0 or mt != 0:
                 raise TapeStructureError(
                     "the tape does not begin with a tape head (TPID) "
@@ -230,7 +220,7 @@ def _scan(records):
         raise TapeStructureError("the tape does not contain any records")
 
     for byte_length, part in records:
-        ctrl = part[66:75]
+        ctrl = part[_CTRL_COLS]
 
         # fast path: the control fields are unchanged, so this record
         # continues the section currently under construction
@@ -244,9 +234,9 @@ def _scan(records):
             offset += byte_length
             continue
 
-        mat = _fast_int(ctrl[0:4])
-        mf = _fast_int(ctrl[4:6])
-        mt = _fast_int(ctrl[6:9])
+        mat = _control_int(ctrl[0:4])
+        mf = _control_int(ctrl[4:6])
+        mt = _control_int(ctrl[6:9])
 
         if mat == -1:  # TEND: end of tape
             break
@@ -359,7 +349,7 @@ def _scan_chunk_runs(buf, num_records, start_row, base, line_width, st):
     if not bool(_np.all(arr[:, line_width - 1] == 0x0A)):
         st.uniform = False
         return
-    ctrl = arr[:, 66:75]  # the MAT/MF/MT control field of every record
+    ctrl = arr[:, _CTRL_COLS]  # the MAT/MF/MT control field of every record
 
     # segment the rows into runs of identical control fields
     window = ctrl[start_row:]
@@ -379,9 +369,9 @@ def _scan_chunk_runs(buf, num_records, start_row, base, line_width, st):
                 st.uniform = False  # a record with data but a blank control
                 return
             continue
-        mat = _fast_int(ctrl_field[0:4])
-        mf = _fast_int(ctrl_field[4:6])
-        mt = _fast_int(ctrl_field[6:9])
+        mat = _control_int(ctrl_field[0:4])
+        mf = _control_int(ctrl_field[4:6])
+        mt = _control_int(ctrl_field[6:9])
         if mat == -1:  # TEND: end of tape
             st.done = True
             return
@@ -461,7 +451,7 @@ def _vec_scan_file(fh, chunk_bytes):
     arr0 = flat[: num0 * line_width].reshape(num0, line_width)
     if not bool(_np.all(arr0[:, line_width - 1] == 0x0A)):
         return None
-    ctrl0 = arr0[:, 66:75]
+    ctrl0 = arr0[:, _CTRL_COLS]
     nonblank = _np.any(ctrl0 != 0x20, axis=1)
     if not bool(_np.any(nonblank)):
         return None
@@ -469,7 +459,7 @@ def _vec_scan_file(fh, chunk_bytes):
     if tpid_row and first[: tpid_row * line_width].strip():
         return None  # non-blank content before the TPID
     head = ctrl0[tpid_row].tobytes()
-    if _fast_int(head[4:6]) != 0 or _fast_int(head[6:9]) != 0:
+    if _control_int(head[4:6]) != 0 or _control_int(head[6:9]) != 0:
         return None  # does not begin with a TPID record
     tpid_offset = tpid_row * line_width
     tpid = (
@@ -499,7 +489,7 @@ def _vec_scan_file(fh, chunk_bytes):
             if remainder:
                 # a partial trailing record: accept it only if benign
                 tail = block[len(block) - remainder :]
-                if tail.strip() and _fast_int(tail[66:70]) != -1:
+                if tail.strip() and _control_int(tail[_MAT_COLS]) != -1:
                     return None
                 block = block[: len(block) - remainder]
             if block:

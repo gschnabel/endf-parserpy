@@ -48,8 +48,8 @@ from .errors import (
 )
 from .index import TapeIndex
 from .material import MaterialView, _MaterialSlot
-from .operations import write_tape, write_tape_file
-from .splitter import _control_numbers
+from .operations import write_tape, write_tape_file, _VALID_ON_ERROR, _FailedUnit
+from .splitter import _control_numbers, TEND_LINE
 from .views import (
     _FrozenMapping,
     _FrozenSequence,
@@ -62,8 +62,9 @@ from .views import (
 
 
 _VALID_MODES = ("index", "load_raw", "parse_all")
-_VALID_ON_ERROR = ("raise", "mark")
 _VALID_CHECK_EDITS = ("eager", "deferred")
+# _VALID_ON_ERROR is shared with operations.py -- the on_error policy is
+# the same concept for EndfFile and for the parse_tape functions.
 _BACKEND_OF = {"EndfParserCpp": "cpp", "EndfParserPy": "python"}
 
 # sentinel distinguishing "no value given" from an explicit value of None
@@ -114,7 +115,7 @@ class _CurrentMaterials:
         return [i for i, s in enumerate(self._slots) if s.za == za]
 
 
-class FailedSection:
+class FailedSection(_FailedUnit):
     """Internal placeholder for a section that could not be parsed.
 
     When the :class:`EndfFile` was opened with ``on_error="mark"`` a
@@ -140,8 +141,7 @@ class FailedSection:
     """
 
     def __init__(self, exception, raw_lines, position, mf, mt):
-        self.exception = exception
-        self.raw_lines = list(raw_lines)
+        super().__init__(exception, raw_lines)
         self.position = position
         self.mf = mf
         self.mt = mt
@@ -523,6 +523,18 @@ class EndfFile:
 
     # -- secondary lookups ---------------------------------------------
 
+    def _positions(self, *, mat=None, za=None):
+        """Tape positions of the materials matching every given criterion.
+
+        The single structural-filter loop behind :meth:`by_mat`,
+        :meth:`by_za` and :meth:`find`.
+        """
+        return [
+            i
+            for i, s in enumerate(self._materials)
+            if (mat is None or s.mat == mat) and (za is None or s.za == za)
+        ]
+
     def by_mat(self, mat, *, occurrence=None):
         """Return the material with the given MAT number.
 
@@ -531,7 +543,7 @@ class EndfFile:
         that is not unique raises :class:`AmbiguousMaterialError`.
         """
         self._ensure_valid()
-        positions = [i for i, s in enumerate(self._materials) if s.mat == mat]
+        positions = self._positions(mat=mat)
         if not positions:
             raise KeyError(f"no material with MAT={mat}")
         if occurrence is not None:
@@ -546,7 +558,7 @@ class EndfFile:
     def by_za(self, za):
         """Return a list of materials with the given ZA identifier."""
         self._ensure_valid()
-        return [self[i] for i, s in enumerate(self._materials) if s.za == za]
+        return [self[i] for i in self._positions(za=za)]
 
     def find(self, *, mat=None, za=None):
         """Return a list of materials matching every given criterion.
@@ -555,14 +567,7 @@ class EndfFile:
         field, see :meth:`query`.
         """
         self._ensure_valid()
-        result = []
-        for i, slot in enumerate(self._materials):
-            if mat is not None and slot.mat != mat:
-                continue
-            if za is not None and slot.za != za:
-                continue
-            result.append(self[i])
-        return result
+        return [self[i] for i in self._positions(mat=mat, za=za)]
 
     # -- path-based queries --------------------------------------------
 
@@ -623,34 +628,40 @@ class EndfFile:
             self._secondary_indexes[name] = mapping
         return mapping
 
+    def _resolve_query_field(self, slot, mf, mt, subpath):
+        """Resolve one section field of a material for the bulk lookups.
+
+        Returns ``(True, value)`` for a field that is present, and
+        ``(False, None)`` when the material lacks the section or the
+        field, or the section failed to parse under ``on_error="mark"``
+        (under ``on_error="raise"`` the failing parse propagates). The
+        section is read through the cache, so addressing the same
+        ``MF/MT`` more than once does not re-parse it. Shared by
+        :meth:`query` and :meth:`build_index`.
+        """
+        if (mf, mt) not in self._slot_section_keys_set(slot):
+            return False, None
+        section = self._get_slot_section(slot, mf, mt)
+        if isinstance(section, FailedSection):
+            return False, None
+        if not section_has(section, subpath):
+            return False, None
+        return True, walk_section(section, subpath)
+
     def _collect_index_values(self, slot, specs):
         """Return the field values for ``build_index``, or ``None`` to skip.
 
-        ``specs`` is a list of ``(mf, mt, subpath)``. A section is parsed
-        once even when several specs address the same ``MF/MT``. The
-        material is skipped (``None`` is returned) when it lacks any of
-        the addressed sections or fields, or when a needed section
-        failed to parse under ``on_error="mark"`` (under
-        ``on_error="raise"`` the failing parse propagates instead).
+        ``specs`` is a list of ``(mf, mt, subpath)``. The material is
+        skipped (``None`` is returned) when it lacks any of the
+        addressed sections or fields, or when a needed section failed to
+        parse under ``on_error="mark"``.
         """
-        keys = self._slot_section_keys_set(slot)
-        parsed = {}
         values = []
         for mf, mt, subpath in specs:
-            if (mf, mt) not in keys:
+            found, value = self._resolve_query_field(slot, mf, mt, subpath)
+            if not found:
                 return None
-            section = parsed.get((mf, mt))
-            if section is None:
-                section = self._get_slot_section(slot, mf, mt)
-                if isinstance(section, FailedSection):
-                    # on_error="mark": skip a material whose section
-                    # failed to parse (under "raise" the parse already
-                    # raised and never returned a FailedSection here)
-                    return None
-                parsed[(mf, mt)] = section
-            if not section_has(section, subpath):
-                return None
-            values.append(walk_section(section, subpath))
+            values.append(value)
         return values
 
     def query(self, section_path, value=_UNSET, *, predicate=None, tol=0.0):
@@ -666,16 +677,9 @@ class EndfFile:
         mf, mt, subpath = parse_section_path(section_path)
         matches = []
         for position, slot in enumerate(self._materials):
-            if (mf, mt) not in self._slot_section_keys_set(slot):
+            found, field = self._resolve_query_field(slot, mf, mt, subpath)
+            if not found:
                 continue
-            section = self._get_slot_section(slot, mf, mt)
-            if isinstance(section, FailedSection):
-                # on_error="mark": skip an unparsable section (under
-                # "raise" the parse already raised above)
-                continue
-            if not section_has(section, subpath):
-                continue
-            field = walk_section(section, subpath)
             if predicate is not None:
                 matched = bool(predicate(field))
             else:
@@ -929,7 +933,7 @@ class EndfFile:
             + [
                 _control_line(entry.mat, 0, 0),  # FEND
                 _control_line(0, 0, 0),  # MEND
-                _control_line(-1, 0, 0),  # TEND
+                TEND_LINE,  # TEND
             ]
         )
         try:
