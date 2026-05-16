@@ -30,8 +30,14 @@ class _MaterialSlot:
     backing :class:`TapeIndex`; for a material added in memory it is
     ``None``. ``overlay`` holds sections that were set or added (keyed
     by ``(MF, MT)``), and ``deleted`` the ``(MF, MT)`` keys removed from
-    the original material.
+    the original material. ``removed`` is set when the material itself
+    is deleted from the tape, which invalidates any :class:`MaterialView`
+    bound to the slot.
     """
+
+    # a class attribute, so it defaults to False without per-instance
+    # storage and survives unpickling of slots written before it existed
+    removed = False
 
     def __init__(self, original_position=None, mat=None, za=None, awr=None):
         self.original_position = original_position
@@ -65,54 +71,70 @@ class MaterialView:
 
     The view is bound to the underlying material, so it stays valid if
     the tape is reordered; it becomes invalid only if that material is
-    deleted.
+    deleted, after which every operation on it raises
+    :class:`RuntimeError`.
     """
 
     def __init__(self, endf_file, slot):
         self._file = endf_file
         self._slot = slot
 
+    def _check_live(self):
+        """Raise if the material this view is bound to has been deleted."""
+        if self._slot.removed:
+            raise RuntimeError("this material has been deleted from the tape")
+
     @property
     def position(self):
         """The material's current zero-based position on the tape."""
+        self._check_live()
         return self._file._position_of(self._slot)
 
     @property
     def mat(self):
         """ENDF MAT number of the material."""
+        self._check_live()
         return self._slot.mat
 
     @property
     def za(self):
         """ZA identifier of the material, or ``None`` if unknown."""
+        self._check_live()
         return self._slot.za
 
     @property
     def awr(self):
         """Atomic weight ratio of the material, or ``None`` if unknown."""
+        self._check_live()
         return self._slot.awr
 
     @property
     def is_modified(self):
         """Whether this material has been edited."""
+        self._check_live()
         return self._slot.is_modified
 
     def sections(self):
         """Return the list of ``(MF, MT)`` section keys of this material."""
+        self._check_live()
         return self._file._slot_section_keys(self._slot)
 
     def __getitem__(self, key):
+        self._check_live()
         mf, mt = _as_mfmt(key)
         section = self._file._get_slot_section(self._slot, mf, mt)
         return self._file._view(self._slot, mf, mt, section)
 
     def __setitem__(self, key, value):
+        self._check_live()
         self._file._set_slot_section(self._slot, *_as_mfmt(key), value)
 
     def __delitem__(self, key):
+        self._check_live()
         self._file._delete_slot_section(self._slot, *_as_mfmt(key))
 
     def __contains__(self, key):
+        self._check_live()
         try:
             mfmt = _as_mfmt(key)
         except KeyError:
@@ -120,12 +142,16 @@ class MaterialView:
         return mfmt in self._file._slot_section_keys(self._slot)
 
     def __iter__(self):
+        self._check_live()
         return iter(self._file._slot_section_keys(self._slot))
 
     def __len__(self):
+        self._check_live()
         return len(self._file._slot_section_keys(self._slot))
 
     def __repr__(self):
+        if self._slot.removed:
+            return f"<MaterialView (deleted) MAT={self._slot.mat}>"
         return (
             f"<MaterialView position={self.position} "
             f"MAT={self._slot.mat} ZA={self._slot.za}>"

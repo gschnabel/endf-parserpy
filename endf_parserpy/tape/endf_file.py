@@ -320,6 +320,7 @@ class EndfFile:
         """
         with self._lock:
             slot = self._materials.pop(position)
+            slot.removed = True
             self._material_views.pop(slot, None)
             self._invalidate_indexes()
 
@@ -501,7 +502,12 @@ class EndfFile:
         than at :meth:`export` time.
         """
         self._ensure_valid()
-        slot = _MaterialSlot(original_position=None, mat=mat, za=za, awr=awr)
+        slot = _MaterialSlot(
+            original_position=None,
+            mat=int(mat),
+            za=None if za is None else int(za),
+            awr=None if awr is None else float(awr),
+        )
         for mf, mtdic in material.items():
             if mf == 0:
                 continue

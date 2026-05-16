@@ -358,8 +358,30 @@ def test_deleted_material_view_is_invalid(tmp_path, parser):
     endf_file, _ = _open(tmp_path, parser, [CU, ZN])
     view = endf_file[1]
     del endf_file[1]
+    # every operation on a view of a deleted material raises -- a stale
+    # read or, worse, an edit dropped into a slot no longer on the tape
     with pytest.raises(RuntimeError):
         view.position
+    with pytest.raises(RuntimeError):
+        view.mat
+    with pytest.raises(RuntimeError):
+        view[1, 451]
+    with pytest.raises(RuntimeError):
+        view.sections()
+    with pytest.raises(RuntimeError):
+        len(view)
+    with pytest.raises(RuntimeError):
+        view[1, 451] = {}
+
+
+def test_append_material_coerces_identifiers(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    zn = parser.parse(_read_lines(ZN), exclude=RAW_EXCLUDE)
+    # string identifiers are coerced, so the material stays findable
+    view = endf_file.append_material(zn, mat="3025", za="30064")
+    assert view.mat == 3025 and view.za == 30064
+    assert endf_file.by_mat(3025).position == view.position
+    assert [v.position for v in endf_file.by_za(30064)] == [view.position]
 
 
 # --------------------------------------------------------------------------
