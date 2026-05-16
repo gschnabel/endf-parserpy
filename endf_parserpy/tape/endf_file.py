@@ -33,6 +33,7 @@ from collections.abc import Mapping
 from ..endf_parser_factory import EndfParserFactory
 from .address import (
     EndfMaterialPath,
+    parse_index_spec,
     parse_section_path,
     section_has,
     walk_section,
@@ -517,41 +518,77 @@ class EndfFile:
         return self[path]
 
     def build_index(self, section_path, *, name=None):
-        """Build a secondary index over a section field.
+        """Build a secondary index over one or several section fields.
 
-        Parses the ``MF/MT`` section of every material that has it,
-        reads the value at the field path and returns a dict
-        ``{value: [positions]}``. This parses one section per material,
-        so the cost grows with the number of materials. With ``name``
-        the result is also stored and reachable via
+        With a single section path -- a string ``"MF/MT[/field...]"`` --
+        this parses that section of every material that has it, reads
+        the value at the field path and returns a dict
+        ``{value: [positions]}``.
+
+        With a list (or tuple) of section paths it builds a *composite*
+        index instead: the key is the tuple of the values at the
+        respective paths, in the order given, so the result is a dict
+        ``{(value0, value1, ...): [positions]}``. A material is indexed
+        only if *every* path resolves for it; one that lacks any of the
+        addressed sections or fields is skipped. Paths that share an
+        ``MF/MT`` section have it parsed only once per material. The key
+        shape follows the *argument type*: a one-element list still
+        yields one-element-tuple keys.
+
+        One section is parsed per material per distinct ``MF/MT``, so
+        the cost grows with the number of materials. With ``name`` the
+        result is also stored and reachable via
         :attr:`secondary_indexes`.
         """
-        mf, mt, subpath = parse_section_path(section_path)
+        self._ensure_valid()
+        specs, is_multi = parse_index_spec(section_path)
         mapping = {}
         for position, slot in enumerate(self._materials):
-            if (mf, mt) not in self._slot_section_keys_set(slot):
+            values = self._collect_index_values(slot, position, specs)
+            if values is None:
                 continue
-            section = self._get_slot_section(slot, mf, mt)
-            if isinstance(section, FailedSection):
-                if self._on_error == "raise":
-                    raise SectionParseError(
-                        f"MF={mf}/MT={mt} of the material at position "
-                        f"{position} failed to parse"
-                    ) from section.exception
-                continue
-            if not section_has(section, subpath):
-                continue
-            value = walk_section(section, subpath)
+            key = tuple(values) if is_multi else values[0]
             try:
-                mapping.setdefault(value, []).append(position)
+                mapping.setdefault(key, []).append(position)
             except TypeError:
                 raise ValueError(
                     f"section path {section_path!r} resolves to a "
-                    "non-hashable value; build_index needs a scalar field"
+                    "non-hashable value; build_index needs scalar field(s)"
                 ) from None
         if name is not None:
             self._secondary_indexes[name] = mapping
         return mapping
+
+    def _collect_index_values(self, slot, position, specs):
+        """Return the field values for ``build_index``, or ``None`` to skip.
+
+        ``specs`` is a list of ``(mf, mt, subpath)``. A section is parsed
+        once even when several specs address the same ``MF/MT``. The
+        material is skipped (``None`` is returned) when it lacks any of
+        the addressed sections or fields, or when a needed section
+        failed to parse under ``on_error="mark"``.
+        """
+        keys = self._slot_section_keys_set(slot)
+        parsed = {}
+        values = []
+        for mf, mt, subpath in specs:
+            if (mf, mt) not in keys:
+                return None
+            section = parsed.get((mf, mt))
+            if section is None:
+                section = self._get_slot_section(slot, mf, mt)
+                if isinstance(section, FailedSection):
+                    if self._on_error == "raise":
+                        raise SectionParseError(
+                            f"MF={mf}/MT={mt} of the material at position "
+                            f"{position} failed to parse"
+                        ) from section.exception
+                    return None
+                parsed[(mf, mt)] = section
+            if not section_has(section, subpath):
+                return None
+            values.append(walk_section(section, subpath))
+        return values
 
     def query(self, section_path, value=_UNSET, *, predicate=None, tol=0.0):
         """Return the materials whose section field matches.

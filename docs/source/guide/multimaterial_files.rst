@@ -290,6 +290,17 @@ it:
    # e.g. {293.6: [0, 3], 600.0: [1, 4], ...}
    positions = temperatures[293.6]
 
+Passing a list of section paths instead of a single one builds a
+*composite* index: the key becomes the tuple of the values at the
+given paths, in order. The paths may address fields in different
+sections, and a material that lacks any of them is left out:
+
+.. code:: Python
+
+   index = endf_file.build_index(['1/451/ZA', '1/451/TEMP'])
+   # e.g. {(29063.0, 293.6): [0], (30064.0, 293.6): [1], ...}
+   positions = index[(29063.0, 293.6)]
+
 A single value can also be retrieved directly with the
 :meth:`~endf_parserpy.EndfFile.get` method and a
 material-qualified path. Such a path, described by the

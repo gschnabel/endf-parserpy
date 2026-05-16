@@ -181,6 +181,25 @@ def parse_section_path(spec):
     return mf, mt, subpath
 
 
+def parse_index_spec(spec):
+    """Parse a :meth:`EndfFile.build_index` path specification.
+
+    ``spec`` is either a single section path string (the single-field
+    index) or a list/tuple of them (a composite index). Returns
+    ``(specs, is_multi)`` where ``specs`` is a list of ``(mf, mt,
+    subpath)`` triples -- as produced by :func:`parse_section_path` --
+    and ``is_multi`` records whether a composite, tuple-keyed index was
+    requested. The distinction is by argument *type*, so a one-element
+    list still counts as multi.
+    """
+    if isinstance(spec, str):
+        return [parse_section_path(spec)], False
+    paths = list(spec)
+    if not paths:
+        raise ValueError("build_index needs at least one section path")
+    return [parse_section_path(p) for p in paths], True
+
+
 def section_has(section, subpath):
     """Return whether ``subpath`` is present within a parsed section."""
     if subpath is None:

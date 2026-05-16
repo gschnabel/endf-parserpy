@@ -176,6 +176,53 @@ def test_build_index_on_error(tmp_path, parser):
         raising.build_index("1/451/AWR")
 
 
+def test_build_index_multipath(tmp_path, parser):
+    tape = _write_tape(tmp_path, [CU, ZN])
+    endf_file = EndfFile(tape, parser=parser)
+
+    mapping = endf_file.build_index(["1/451/ZA", "1/451/AWR"])
+    # a composite index: every key is the (ZA, AWR) tuple
+    assert all(isinstance(k, tuple) and len(k) == 2 for k in mapping)
+    assert sum(len(v) for v in mapping.values()) == 2
+    za0 = endf_file[0][1, 451]["ZA"]
+    awr0 = endf_file[0][1, 451]["AWR"]
+    assert mapping[(za0, awr0)] == [0]
+
+
+def test_build_index_multipath_cross_section(tmp_path, parser):
+    # paths may address fields in different MF/MT sections
+    tape = _write_tape(tmp_path, [CU, ZN])
+    endf_file = EndfFile(tape, parser=parser)
+    mapping = endf_file.build_index(["1/451/ZA", "3/2/QI"])
+    assert sum(len(v) for v in mapping.values()) == 2
+
+
+def test_build_index_multipath_skips_incomplete(tmp_path, parser):
+    # a material that lacks one of the addressed sections is skipped
+    tape = _write_tape(tmp_path, [CU, ZN])
+    endf_file = EndfFile(tape, parser=parser)
+    del endf_file[1][3, 2]
+    mapping = endf_file.build_index(["1/451/ZA", "3/2/QI"])
+    positions = [p for v in mapping.values() for p in v]
+    assert positions == [0]
+
+
+def test_build_index_single_element_list(tmp_path, parser):
+    # the key shape follows the argument type: a one-element list still
+    # yields one-element-tuple keys
+    tape = _write_tape(tmp_path, [CU])
+    endf_file = EndfFile(tape, parser=parser)
+    mapping = endf_file.build_index(["1/451/AWR"])
+    assert all(isinstance(k, tuple) and len(k) == 1 for k in mapping)
+
+
+def test_build_index_empty_spec(tmp_path, parser):
+    tape = _write_tape(tmp_path, [CU])
+    endf_file = EndfFile(tape, parser=parser)
+    with pytest.raises(ValueError):
+        endf_file.build_index([])
+
+
 # --------------------------------------------------------------------------
 # query
 # --------------------------------------------------------------------------
