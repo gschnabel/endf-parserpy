@@ -299,11 +299,23 @@ class EndfFile:
         Dropping the :class:`MaterialView` keeps ``_material_views`` from
         accumulating entries for materials that no longer exist; an
         external reference to the view stays valid as an *invalid* view
-        (its :attr:`~MaterialView.position` then raises).
+        (its :attr:`~MaterialView.position` then raises). The named
+        secondary indexes are dropped too -- see :meth:`_invalidate_indexes`.
         """
         with self._lock:
             slot = self._materials.pop(position)
             self._material_views.pop(slot, None)
+            self._invalidate_indexes()
+
+    def _invalidate_indexes(self):
+        """Drop the cached secondary indexes after a structural edit.
+
+        :meth:`build_index` keys its result by tape position, so adding,
+        removing or reordering materials would silently leave a stored
+        index pointing at the wrong materials. Rather than let it go
+        stale, any structural edit clears it; rebuild it afterwards.
+        """
+        self._secondary_indexes.clear()
 
     def _resolve_key(self, key):
         """Resolve a path key to ``(position, mf, mt, subpath)``.
@@ -321,6 +333,13 @@ class EndfFile:
         return position, mp.mf, mp.mt, mp.subpath
 
     def __getitem__(self, key):
+        """Return the material, section or field addressed by ``key``.
+
+        ``key`` is an integer material position or an
+        :class:`EndfMaterialPath` (string or object). A material-depth
+        path yields a :class:`MaterialView`, a section-depth path a
+        section view and a field-depth path the value at that field.
+        """
         self._ensure_valid()
         if isinstance(key, int):
             return self._material_view(self._materials[key])
@@ -338,6 +357,12 @@ class EndfFile:
         return self._view(slot, mf, mt, section, subpath)
 
     def __setitem__(self, key, value):
+        """Assign the section or field addressed by an :class:`EndfMaterialPath`.
+
+        A section-depth path replaces or adds a whole section; a
+        field-depth path edits one field within it. Whole materials
+        cannot be assigned -- use :meth:`append_material`.
+        """
         self._ensure_valid()
         if isinstance(key, int):
             raise ValueError(
@@ -387,7 +412,9 @@ class EndfFile:
         An ``int`` is tested as a material position. A malformed path or
         an ambiguous bare-MAT selector is genuinely ill-posed and
         propagates its :class:`ValueError` / :class:`AmbiguousMaterialError`
-        rather than being answered ``False``.
+        rather than being answered ``False``. A field-depth path whose
+        section cannot be parsed answers ``False`` -- the field is not
+        reachable -- regardless of the ``on_error`` mode.
         """
         self._ensure_valid()
         if isinstance(key, int):
@@ -407,13 +434,14 @@ class EndfFile:
             return True
         try:
             section = self._get_slot_section(slot, mf, mt)
-        except KeyError:
+        except (KeyError, SectionParseError):
             return False
         if not isinstance(section, Mapping):
-            return False
+            return False  # an unparsable (FailedSection) or raw section
         return section_has(section, subpath)
 
     def __iter__(self):
+        """Iterate over the materials as :class:`MaterialView` objects."""
         self._ensure_valid()
         for position in range(len(self._materials)):
             yield self._material_view(self._materials[position])
@@ -476,6 +504,7 @@ class EndfFile:
                 slot.overlay[mf_mt] = section
         with self._lock:
             self._materials.append(slot)
+            self._invalidate_indexes()
         return self[len(self._materials) - 1]
 
     def reorder(self, order):
@@ -490,6 +519,7 @@ class EndfFile:
             raise ValueError("order must be a permutation of range(len(self))")
         with self._lock:
             self._materials = [self._materials[i] for i in order]
+            self._invalidate_indexes()
 
     # -- secondary lookups ---------------------------------------------
 
@@ -500,6 +530,7 @@ class EndfFile:
         share a MAT number, as on a PENDF tape. Without it, a MAT number
         that is not unique raises :class:`AmbiguousMaterialError`.
         """
+        self._ensure_valid()
         positions = [i for i, s in enumerate(self._materials) if s.mat == mat]
         if not positions:
             raise KeyError(f"no material with MAT={mat}")
@@ -514,6 +545,7 @@ class EndfFile:
 
     def by_za(self, za):
         """Return a list of materials with the given ZA identifier."""
+        self._ensure_valid()
         return [self[i] for i, s in enumerate(self._materials) if s.za == za]
 
     def find(self, *, mat=None, za=None):
@@ -522,6 +554,7 @@ class EndfFile:
         This is the structural lookup. For lookups by a parsed section
         field, see :meth:`query`.
         """
+        self._ensure_valid()
         result = []
         for i, slot in enumerate(self._materials):
             if mat is not None and slot.mat != mat:
@@ -567,7 +600,9 @@ class EndfFile:
         One section is parsed per material per distinct ``MF/MT``, so
         the cost grows with the number of materials. With ``name`` the
         result is also stored and reachable via
-        :attr:`secondary_indexes`.
+        :attr:`secondary_indexes`; because the index is keyed by tape
+        position, a stored index is dropped whenever a material is
+        appended, removed or reordered, and must then be rebuilt.
         """
         self._ensure_valid()
         specs, is_multi = parse_index_spec(section_path)
@@ -625,6 +660,7 @@ class EndfFile:
         numbers) or ``predicate`` (a callable applied to the field).
         Returns a list of :class:`MaterialView`.
         """
+        self._ensure_valid()
         if (value is _UNSET) == (predicate is None):
             raise ValueError("pass exactly one of value or predicate")
         mf, mt, subpath = parse_section_path(section_path)
@@ -650,7 +686,11 @@ class EndfFile:
 
     @property
     def secondary_indexes(self):
-        """The named secondary indexes built by :meth:`build_index`."""
+        """The named secondary indexes built by :meth:`build_index`.
+
+        Emptied whenever a material is appended, removed or reordered,
+        since the indexes are keyed by tape position.
+        """
         return self._secondary_indexes
 
     # -- per-material section access (slot-aware) ----------------------

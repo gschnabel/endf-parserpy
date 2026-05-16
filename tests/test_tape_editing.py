@@ -246,7 +246,24 @@ def test_export_onto_source_invalidates(tmp_path, parser):
         endf_file[0]
     with pytest.raises(StaleSourceError):
         endf_file.export(tmp_path / "elsewhere.endf")
+    # the secondary lookups guard against the stale index too
+    with pytest.raises(StaleSourceError):
+        endf_file.by_za(29063)
+    with pytest.raises(StaleSourceError):
+        endf_file.find(za=29063)
+    with pytest.raises(StaleSourceError):
+        endf_file.query("1/451", value=0.0)
     assert "invalidated" in repr(endf_file)
+
+
+def test_secondary_index_dropped_on_structural_edit(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU, ZN])
+    endf_file.build_index("1/451/AWR", name="by_awr")
+    assert "by_awr" in endf_file.secondary_indexes
+    del endf_file[0]
+    # a position-keyed index would be wrong after a structural edit, so
+    # it is dropped rather than left stale
+    assert endf_file.secondary_indexes == {}
 
 
 def test_save_to_other_path_keeps_object_valid(tmp_path, parser):

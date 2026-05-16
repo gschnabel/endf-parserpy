@@ -242,6 +242,17 @@ def test_on_error_raise(multi_lines, tmp_path, parser):
         endf_file[0][1, 451]
 
 
+def test_contains_false_for_unparsable_section_field(multi_lines, tmp_path, parser):
+    path = _corrupt_tape(multi_lines, tmp_path)
+    for mode in ("mark", "raise"):
+        endf_file = EndfFile(path, parser=parser, on_error=mode)
+        # the corrupt section is structurally present ...
+        assert "#0/1/451" in endf_file
+        # ... but a field within it is unreachable, so `in` answers
+        # False rather than raising, in either on_error mode
+        assert "#0/1/451/AWR" not in endf_file
+
+
 # --------------------------------------------------------------------------
 # verify_source
 # --------------------------------------------------------------------------
