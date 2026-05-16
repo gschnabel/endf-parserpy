@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/15
+# Last modified:   2026/05/16
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -17,10 +17,13 @@ repeat the same material at different temperatures). A tape is split
 into single-material chunks by :func:`~endf_parserpy.tape.splitter.split_materials`
 and each chunk is handed to an ordinary single-material parser. The
 single-material parser itself is used unchanged.
+
+Each operation comes as a pair, mirroring the ``parse`` / ``parsefile``
+naming of the single-material parser: the bare name works on an
+in-memory ENDF-6 string, the ``_file`` variant on a file path.
 """
 
 import os
-from contextlib import contextmanager
 
 from ..endf_parser_factory import EndfParserFactory
 from .splitter import split_materials, _control_numbers, TEND_LINE
@@ -32,10 +35,11 @@ _VALID_ON_ERROR = ("raise", "mark")
 class FailedMaterial:
     """Placeholder for a material that could not be parsed.
 
-    Returned by :func:`parse_tape` and :func:`iter_parse_tape` in place
-    of a parsed material dictionary when ``on_error="mark"`` and the
-    parsing of that material failed. Passing a :class:`FailedMaterial`
-    back to :func:`write_tape` writes its original lines verbatim.
+    Returned by :func:`parse_tape` and :func:`iter_parse_tape` (and
+    their ``_file`` variants) in place of a parsed material dictionary
+    when ``on_error="mark"`` and the parsing of that material failed.
+    Passing a :class:`FailedMaterial` back to :func:`write_tape` writes
+    its original lines verbatim.
 
     Attributes
     ----------
@@ -68,33 +72,36 @@ def _ensure_parser(parser):
     return parser
 
 
-@contextmanager
-def _line_stream(source):
-    """Yield an iterator over the lines of ``source``.
+def _check_on_error(on_error):
+    if on_error not in _VALID_ON_ERROR:
+        raise ValueError(f"on_error must be one of {_VALID_ON_ERROR}, got {on_error!r}")
 
-    ``source`` is either a path (``str`` or :class:`os.PathLike`) to an
-    ENDF file, or an iterable of lines (e.g. a ``list`` of strings).
-    To pass ENDF data held in a single string, use ``str.splitlines()``.
-    """
-    if isinstance(source, (str, os.PathLike)):
-        fh = open(source, "r")
+
+# --------------------------------------------------------------------------
+# parsing
+# --------------------------------------------------------------------------
+
+
+def _iter_materials(lines, parser, exclude, include, on_error):
+    """Split ``lines`` into materials and parse them one at a time."""
+    for chunk in split_materials(lines):
         try:
-            yield fh
-        finally:
-            fh.close()
-    else:
-        yield iter(source)
+            yield parser.parse(chunk, exclude=exclude, include=include)
+        except Exception as exc:
+            if on_error == "raise":
+                raise
+            yield FailedMaterial(exc, chunk)
 
 
-def iter_parse_tape(
-    source, *, parser=None, exclude=None, include=None, on_error="mark"
-):
+def iter_parse_tape(text, *, parser=None, exclude=None, include=None, on_error="mark"):
     """Parse a multi-material ENDF tape, yielding one material at a time.
 
     Parameters
     ----------
-    source : str or os.PathLike or Iterable[str]
-        Path to an ENDF file, or an iterable of its lines.
+    text : str
+        The ENDF-6 formatted tape as a single string, as produced by
+        :func:`write_tape` or :meth:`~endf_parserpy.EndfFile.to_string`.
+        To parse a file on disk, use :func:`iter_parse_tape_file`.
     parser : EndfParserBase, optional
         The single-material parser used for each material. Defaults to
         ``EndfParserFactory.create(select="fastest")``.
@@ -115,28 +122,38 @@ def iter_parse_tape(
 
     Notes
     -----
-    Only one material is held in memory at a time, so peak memory use
-    is bounded by the largest single material rather than by the size
-    of the whole tape.
+    Only one material is held in parsed form at a time, so the parsed
+    data does not accumulate; for a tape too large to hold in memory at
+    all, parse it from disk with :func:`iter_parse_tape_file`.
     """
-    if on_error not in _VALID_ON_ERROR:
-        raise ValueError(f"on_error must be one of {_VALID_ON_ERROR}, got {on_error!r}")
+    _check_on_error(on_error)
     parser = _ensure_parser(parser)
-    with _line_stream(source) as lines:
-        for chunk in split_materials(lines):
-            try:
-                yield parser.parse(chunk, exclude=exclude, include=include)
-            except Exception as exc:
-                if on_error == "raise":
-                    raise
-                yield FailedMaterial(exc, chunk)
+    yield from _iter_materials(text.splitlines(), parser, exclude, include, on_error)
 
 
-def parse_tape(source, *, parser=None, exclude=None, include=None, on_error="mark"):
-    """Parse a multi-material ENDF tape into a list of materials.
+def iter_parse_tape_file(
+    path, *, parser=None, exclude=None, include=None, on_error="mark"
+):
+    """Parse a multi-material ENDF tape from a file, one material at a time.
+
+    The file counterpart of :func:`iter_parse_tape`; the ``path``
+    argument is a file path (``str`` or :class:`os.PathLike`). The file
+    is read incrementally, so peak memory use is bounded by the largest
+    single material rather than by the size of the whole tape. See
+    :func:`iter_parse_tape` for the remaining parameters.
+    """
+    _check_on_error(on_error)
+    parser = _ensure_parser(parser)
+    with open(os.fspath(path), "r") as fh:
+        yield from _iter_materials(fh, parser, exclude, include, on_error)
+
+
+def parse_tape(text, *, parser=None, exclude=None, include=None, on_error="mark"):
+    """Parse a multi-material ENDF tape string into a list of materials.
 
     This is the eager counterpart of :func:`iter_parse_tape`; see there
-    for a description of the parameters.
+    for a description of the parameters. To parse a file on disk, use
+    :func:`parse_tape_file`.
 
     Returns
     -------
@@ -147,13 +164,28 @@ def parse_tape(source, *, parser=None, exclude=None, include=None, on_error="mar
     """
     return list(
         iter_parse_tape(
-            source,
-            parser=parser,
-            exclude=exclude,
-            include=include,
-            on_error=on_error,
+            text, parser=parser, exclude=exclude, include=include, on_error=on_error
         )
     )
+
+
+def parse_tape_file(path, *, parser=None, exclude=None, include=None, on_error="mark"):
+    """Parse a multi-material ENDF tape file into a list of materials.
+
+    The file counterpart of :func:`parse_tape`; the ``path`` argument is
+    a file path (``str`` or :class:`os.PathLike`). See :func:`parse_tape`
+    for the return value and :func:`iter_parse_tape` for the parameters.
+    """
+    return list(
+        iter_parse_tape_file(
+            path, parser=parser, exclude=exclude, include=include, on_error=on_error
+        )
+    )
+
+
+# --------------------------------------------------------------------------
+# writing
+# --------------------------------------------------------------------------
 
 
 def _strip_trailing_tend(lines):
@@ -180,38 +212,14 @@ def _material_lines(material, parser, exclude, include):
     return parser.write(material, exclude=exclude, include=include)
 
 
-def write_tape(
-    materials, out=None, *, parser=None, exclude=None, include=None, overwrite=False
-):
-    """Assemble materials into a single multi-material ENDF tape.
+def _assemble_tape_lines(materials, parser, exclude, include):
+    """Assemble materials into the lines of a single multi-material tape.
 
     Each material is written with an ordinary single-material parser;
     the resulting per-material tape head (TPID) and tape end (TEND)
-    records are then stripped so that the combined tape carries the
-    TPID once at the start, every material followed by its MEND record,
-    and a single TEND record at the end. A :class:`FailedMaterial` is
-    written verbatim from its stored lines.
-
-    Parameters
-    ----------
-    materials : Iterable
-        Parsed material dictionaries and/or :class:`FailedMaterial`
-        objects, in the desired tape order.
-    out : str or os.PathLike or file-like, optional
-        If ``None`` (default) the assembled lines are returned. If a
-        path or a writable file-like object, the tape is written there.
-    parser : EndfParserBase, optional
-        Parser used to write each material. Defaults to
-        ``EndfParserFactory.create(select="fastest")``.
-    exclude, include : optional
-        Forwarded unchanged to the single-material parser's ``write``.
-    overwrite : bool
-        Existing files are only overwritten if this is ``True``.
-
-    Returns
-    -------
-    list[str] or None
-        The assembled tape lines if ``out is None``, otherwise ``None``.
+    records are stripped so that the combined tape carries the TPID once
+    at the start, every material followed by its MEND record, and a
+    single TEND record at the end.
     """
     parser = _ensure_parser(parser)
     body = []
@@ -232,16 +240,51 @@ def write_tape(
         result.append(tpid_line)
     result.extend(body)
     result.append(final_tend if final_tend is not None else TEND_LINE)
+    return result
 
-    if out is None:
-        return result
-    if isinstance(out, (str, os.PathLike)):
-        if os.path.exists(out) and not overwrite:
-            raise FileExistsError(
-                f"file {out} already exists; pass overwrite=True to replace it"
-            )
-        with open(out, "w") as fh:
-            fh.write("\n".join(result) + "\n")
-    else:
-        out.write("\n".join(result) + "\n")
-    return None
+
+def write_tape(materials, *, parser=None, exclude=None, include=None):
+    """Assemble materials into a single multi-material ENDF tape string.
+
+    A :class:`FailedMaterial` is written verbatim from its stored lines.
+
+    Parameters
+    ----------
+    materials : Iterable
+        Parsed material dictionaries and/or :class:`FailedMaterial`
+        objects, in the desired tape order.
+    parser : EndfParserBase, optional
+        Parser used to write each material. Defaults to
+        ``EndfParserFactory.create(select="fastest")``.
+    exclude, include : optional
+        Forwarded unchanged to the single-material parser's ``write``.
+
+    Returns
+    -------
+    str
+        The assembled tape as a single ENDF-6 formatted string, ending
+        with a newline. To write a file instead, use
+        :func:`write_tape_file`.
+    """
+    lines = _assemble_tape_lines(materials, parser, exclude, include)
+    return "\n".join(lines) + "\n"
+
+
+def write_tape_file(
+    materials, path, *, parser=None, exclude=None, include=None, overwrite=False
+):
+    """Assemble materials and write the tape to a file.
+
+    The file counterpart of :func:`write_tape`; ``path`` is a file path
+    (``str`` or :class:`os.PathLike`). An existing file is only
+    overwritten when ``overwrite=True``. See :func:`write_tape` for the
+    remaining parameters.
+    """
+    path = os.fspath(path)
+    if os.path.exists(path) and not overwrite:
+        raise FileExistsError(
+            f"file {path} already exists; pass overwrite=True to replace it"
+        )
+    lines = _assemble_tape_lines(materials, parser, exclude, include)
+    with open(path, "w") as fh:
+        fh.write("\n".join(lines) + "\n")

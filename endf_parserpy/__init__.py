@@ -26,8 +26,11 @@ from .utils.math_utils import EndfFloat
 from .errors import EndfParserpyError
 from .tape import (
     parse_tape,
+    parse_tape_file,
     iter_parse_tape,
+    iter_parse_tape_file,
     write_tape,
+    write_tape_file,
     FailedMaterial,
     TapeIndex,
     EndfFile,
@@ -57,8 +60,11 @@ __all__ = (
     "EndfParserpyError",
     # multi-material tape interface
     "parse_tape",
+    "parse_tape_file",
     "iter_parse_tape",
+    "iter_parse_tape_file",
     "write_tape",
+    "write_tape_file",
     "FailedMaterial",
     "TapeIndex",
     "EndfFile",

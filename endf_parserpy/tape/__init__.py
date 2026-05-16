@@ -22,8 +22,11 @@ from .errors import (
 from .splitter import split_materials
 from .operations import (
     parse_tape,
+    parse_tape_file,
     iter_parse_tape,
+    iter_parse_tape_file,
     write_tape,
+    write_tape_file,
     FailedMaterial,
 )
 from .index import TapeIndex, MaterialIndexEntry, SectionIndexEntry
@@ -33,8 +36,11 @@ from .endf_file import EndfFile, FailedSection
 
 __all__ = (
     "parse_tape",
+    "parse_tape_file",
     "iter_parse_tape",
+    "iter_parse_tape_file",
     "write_tape",
+    "write_tape_file",
     "split_materials",
     "FailedMaterial",
     "TapeIndex",

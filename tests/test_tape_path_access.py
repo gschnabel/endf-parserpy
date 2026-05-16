@@ -148,7 +148,7 @@ def test_section_assignment_roundtrip(tmp_path, parser):
     assert endf_file["#0/1/451/AWR"] == 99.5
 
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     reopened = EndfFile(out, parser=parser)
     assert reopened["#0/1/451/AWR"] == 99.5
     # the other material is untouched
@@ -161,7 +161,7 @@ def test_field_assignment_roundtrip(tmp_path, parser):
     assert endf_file["#0/3/2/AWR"] == 88.0
 
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     assert EndfFile(out, parser=parser)["#0/3/2/AWR"] == 88.0
 
 
@@ -240,7 +240,7 @@ def test_deferred_pure_read_keeps_tape_byte_exact(tmp_path, parser):
     section = endf_file["#0/3/2"]
     _ = section["AWR"], section["xstable"]["E"][0]
     assert not endf_file[0].is_modified
-    assert endf_file.save() == multi
+    assert endf_file.to_string().splitlines() == multi
 
 
 def test_deferred_two_views_share_state(tmp_path, parser):
@@ -260,7 +260,7 @@ def test_deferred_field_delete_then_verify(tmp_path, parser):
     assert (position, mf, mt) == (0, 3, 2)
     assert isinstance(exc, SectionRenderError)
     with pytest.raises(SectionRenderError):
-        endf_file.save()
+        endf_file.to_string()
 
 
 def test_deferred_detach_snapshot_does_not_write_through(tmp_path, parser):

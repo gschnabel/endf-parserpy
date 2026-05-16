@@ -104,8 +104,8 @@ greater than zero.
 .. note::
 
    For files that follow the standard ENDF-6 structure, the
-   :func:`~endf_parserpy.parse_tape` function performs this splitting
-   and parsing automatically; see the guide on
+   :func:`~endf_parserpy.parse_tape_file` function performs this
+   splitting and parsing automatically; see the guide on
    :doc:`multi-material files <multimaterial_files>`. The manual
    approach shown here remains useful when, as for EAF-2007, a custom
    recipe and relaxed record handling are required.

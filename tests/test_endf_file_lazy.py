@@ -216,9 +216,9 @@ def test_on_error_mark(multi_lines, tmp_path, parser):
         endf_file[0][1, 451]
     # an intact material is unaffected ...
     assert endf_file[2][1, 451]["AWR"] is not None
-    # ... and the corrupt material round-trips verbatim through save()
+    # ... and the corrupt material round-trips verbatim through export()
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     assert len(EndfFile(out, parser=parser)) == len(endf_file)
 
 

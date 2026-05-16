@@ -16,18 +16,21 @@ such files.
 Reading and writing a tape
 --------------------------
 
-The :func:`~endf_parserpy.parse_tape` function reads a
+The :func:`~endf_parserpy.parse_tape_file` function reads a
 multi-material file and returns a list with one entry per
 material:
 
 .. code:: Python
 
-   from endf_parserpy import parse_tape
-   materials = parse_tape('tape.endf')   # a list, one entry per material
-   len(materials)                        # number of materials on the tape
+   from endf_parserpy import parse_tape_file
+   materials = parse_tape_file('tape.endf')  # one entry per material
+   len(materials)                            # number of materials
 
-The argument can be a file path or a list of strings with
-ENDF-6 formatted data. Each entry of the list is an ordinary
+Each tape operation comes as a pair: the ``_file`` variant
+works on a file path, the bare name on an ENDF-6 tape held in
+a string. :func:`~endf_parserpy.parse_tape_file` reads a file,
+:func:`~endf_parserpy.parse_tape` parses a string. Each entry
+of the list is an ordinary
 dictionary, identical to what the
 :func:`~endf_parserpy.EndfParserPy.parsefile` method returns
 for a single-material file, and is therefore indexed by MF
@@ -47,7 +50,7 @@ kept as lists of raw strings:
 .. code:: Python
 
    # parse only MF=3 of every material, keep the rest as raw text
-   materials = parse_tape('tape.endf', include=[3])
+   materials = parse_tape_file('tape.endf', include=[3])
 
 Because each material is an ordinary dictionary, modifying the
 data before writing it back is a plain assignment. To change,
@@ -62,16 +65,16 @@ The :ref:`guide on ENDF-6 file plumbing <endf6_file_plumbing_sec>`
 covers modifying, adding and deleting data in more depth; the
 same operations apply to every material of a tape.
 
-The companion function :func:`~endf_parserpy.write_tape`
-performs the reverse operation. Given a path, it writes the
-tape to that file; without a path, it returns the assembled
-ENDF-6 lines as a list of strings:
+The reverse operation is the same pair the other way round:
+:func:`~endf_parserpy.write_tape` assembles the materials into
+an ENDF-6 string, and :func:`~endf_parserpy.write_tape_file`
+writes that tape to a file:
 
 .. code:: Python
 
-   from endf_parserpy import write_tape
-   write_tape(materials, 'output.endf')      # write to a file
-   lines = write_tape(materials)             # or obtain the lines
+   from endf_parserpy import write_tape, write_tape_file
+   write_tape_file(materials, 'output.endf')   # write to a file
+   text = write_tape(materials)                # or obtain the string
 
 If a material cannot be parsed, the ``on_error`` argument
 decides what happens. With the default ``'mark'``, the
@@ -85,7 +88,7 @@ written back without loss:
 
    from endf_parserpy import FailedMaterial
 
-   materials = parse_tape('tape.endf')   # on_error='mark' is the default
+   materials = parse_tape_file('tape.endf')  # on_error='mark' is the default
    for material in materials:
        if isinstance(material, FailedMaterial):
            # .mat is the MAT number, .exception the error that
@@ -99,17 +102,17 @@ operation instead:
 
 .. code:: Python
 
-   materials = parse_tape('tape.endf', on_error='raise')
+   materials = parse_tape_file('tape.endf', on_error='raise')
 
-For large tapes, the :func:`~endf_parserpy.iter_parse_tape`
+For large tapes, the :func:`~endf_parserpy.iter_parse_tape_file`
 function yields one material at a time instead of returning
 the complete list, so that the peak memory consumption stays
 bounded by the size of the largest material:
 
 .. code:: Python
 
-   from endf_parserpy import iter_parse_tape
-   for material in iter_parse_tape('tape.endf'):
+   from endf_parserpy import iter_parse_tape_file
+   for material in iter_parse_tape_file('tape.endf'):
        ...   # one material, a dict or a FailedMaterial
 
 Lazy access with EndfFile
@@ -196,7 +199,7 @@ written back:
    del endf_file[1]                      # delete the second material
 
 A new material — an ordinary ``{MF: {MT: section}}`` mapping,
-such as one entry of a :func:`~endf_parserpy.parse_tape`
+such as one entry of a :func:`~endf_parserpy.parse_tape_file`
 result — is appended with
 :meth:`~endf_parserpy.EndfFile.append_material`, which
 returns a :class:`~endf_parserpy.tape.MaterialView` of the
@@ -204,7 +207,7 @@ added material:
 
 .. code:: Python
 
-   donor = parse_tape('other.endf')[0]                 # a material dictionary
+   donor = parse_tape_file('other.endf')[0]            # a material dictionary
    new_material = endf_file.append_material(donor, mat=9999)
 
 The materials can be reordered by passing a permutation of
@@ -214,18 +217,19 @@ their positions to :meth:`~endf_parserpy.EndfFile.reorder`:
 
    endf_file.reorder([1, 0])             # swap the first two materials
 
-Finally, :meth:`~endf_parserpy.EndfFile.save` writes the
-edited tape. As for :func:`~endf_parserpy.write_tape`, a path
-writes the file and ``out=None`` returns the lines. Sections
-that were not edited are written back verbatim, so an
-unedited tape is reproduced byte for byte:
+Finally, :meth:`~endf_parserpy.EndfFile.export` writes the
+edited tape to a file and :meth:`~endf_parserpy.EndfFile.to_string`
+returns it as an ENDF-6 string -- the same memory/file pairing
+as the module functions. Sections that were not edited are
+written back verbatim, so an unedited tape is reproduced byte
+for byte:
 
 .. code:: Python
 
-   endf_file.save('edited.endf')                 # write to a new file
-   lines = endf_file.save()                      # or obtain the lines
+   endf_file.export('edited.endf')               # write to a new file
+   text = endf_file.to_string()                  # or obtain the string
 
-Saving onto the very file the :class:`~endf_parserpy.EndfFile`
+Exporting onto the very file the :class:`~endf_parserpy.EndfFile`
 was opened from is allowed, but it leaves the in-memory index
 out of step with the rewritten file. The object is therefore
 *invalidated*: any further use raises
@@ -234,8 +238,8 @@ must be re-opened to continue working with it.
 
 .. code:: Python
 
-   endf_file.save('tape.endf', overwrite=True)   # overwrites the source
-   endf_file = EndfFile('tape.endf')             # re-open to continue
+   endf_file.export('tape.endf', overwrite=True)  # overwrites the source
+   endf_file = EndfFile('tape.endf')              # re-open to continue
 
 .. note::
 
@@ -374,8 +378,8 @@ a *read-only* view; to edit it, take a standalone copy with its
 With ``check_edits='deferred'`` a retrieved section is instead a
 *live* view: assigning into it writes straight through to the
 tape, exactly as for an :class:`~endf_parserpy.EndfDict`.
-Recipe-conformity is then checked only when the tape is saved, or
-on demand via :meth:`~endf_parserpy.EndfFile.verify`:
+Recipe-conformity is then checked only when the tape is written
+out, or on demand via :meth:`~endf_parserpy.EndfFile.verify`:
 
 .. code:: Python
 

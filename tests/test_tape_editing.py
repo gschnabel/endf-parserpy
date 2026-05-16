@@ -45,22 +45,22 @@ def _open(tmp_path, parser, paths, name="tape.endf"):
 # --------------------------------------------------------------------------
 
 
-def test_unedited_save_is_byte_exact(tmp_path, parser):
+def test_unedited_export_is_byte_exact(tmp_path, parser):
     multi = _canonical_tape(parser, [CU, ZN])
     path = tmp_path / "tape.endf"
     path.write_text("\n".join(multi) + "\n")
     endf_file = EndfFile(path, parser=parser)
-    assert endf_file.save() == multi
+    assert endf_file.to_string().splitlines() == multi
 
 
-def test_save_to_file(tmp_path, parser):
+def test_export_to_file(tmp_path, parser):
     endf_file, _ = _open(tmp_path, parser, [CU, ZN])
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     assert EndfFile(out, parser=parser).materials()
     with pytest.raises(FileExistsError):
-        endf_file.save(out)
-    endf_file.save(out, overwrite=True)
+        endf_file.export(out)
+    endf_file.export(out, overwrite=True)
 
 
 # --------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def test_value_edit_roundtrip(tmp_path, parser):
     assert endf_file[0].is_modified
 
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     reopened = EndfFile(out, parser=parser)
     assert reopened[0][1, 451]["AWR"] == 123.5
     # the other material is untouched
@@ -101,7 +101,7 @@ def test_delete_section(tmp_path, parser):
     assert victim not in endf_file[0]
 
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     reopened = EndfFile(out, parser=parser)
     assert victim not in reopened[0]
     assert len(reopened[0].sections()) == len(keys) - 1
@@ -138,7 +138,7 @@ def test_delete_material(tmp_path, parser):
     assert len(endf_file) == 1
 
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     reopened = EndfFile(out, parser=parser)
     assert len(reopened) == 1
     assert reopened[0].mat != cu_mat
@@ -152,7 +152,7 @@ def test_append_material(tmp_path, parser):
     assert view.position == 1 and view.mat == 3025
 
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     reopened = EndfFile(out, parser=parser)
     assert len(reopened) == 2
     assert reopened[1].mat == 3025
@@ -165,7 +165,7 @@ def test_reorder(tmp_path, parser):
     assert (endf_file[0].mat, endf_file[1].mat) == (mat1, mat0)
 
     out = tmp_path / "out.endf"
-    endf_file.save(out)
+    endf_file.export(out)
     reopened = EndfFile(out, parser=parser)
     assert (reopened[0].mat, reopened[1].mat) == (mat1, mat0)
 
@@ -173,35 +173,35 @@ def test_reorder(tmp_path, parser):
         endf_file.reorder([0, 0])
 
 
-def test_save_to_same_path(tmp_path, parser):
+def test_export_to_same_path(tmp_path, parser):
     endf_file, path = _open(tmp_path, parser, [CU, ZN])
     del endf_file[1]
-    endf_file.save(path, overwrite=True)
+    endf_file.export(path, overwrite=True)
     reopened = EndfFile(path, parser=parser)
     assert len(reopened) == 1
 
 
-def test_save_onto_source_invalidates(tmp_path, parser):
+def test_export_onto_source_invalidates(tmp_path, parser):
     from endf_parserpy.tape import StaleSourceError
 
     endf_file, path = _open(tmp_path, parser, [CU, ZN])
-    endf_file.save(path, overwrite=True)
+    endf_file.export(path, overwrite=True)
     # the in-memory index no longer matches the rewritten file
     with pytest.raises(StaleSourceError):
         len(endf_file)
     with pytest.raises(StaleSourceError):
         endf_file[0]
     with pytest.raises(StaleSourceError):
-        endf_file.save(tmp_path / "elsewhere.endf")
+        endf_file.export(tmp_path / "elsewhere.endf")
     assert "invalidated" in repr(endf_file)
 
 
 def test_save_to_other_path_keeps_object_valid(tmp_path, parser):
     endf_file, _ = _open(tmp_path, parser, [CU])
-    endf_file.save(tmp_path / "copy.endf")
+    endf_file.export(tmp_path / "copy.endf")
     # saving elsewhere is a plain export and leaves the object usable
     assert len(endf_file) == 1
-    endf_file.save()  # out=None never invalidates either
+    endf_file.to_string()  # to_string() never invalidates either
     assert len(endf_file) == 1
 
 

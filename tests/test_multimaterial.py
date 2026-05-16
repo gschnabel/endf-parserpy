@@ -4,8 +4,10 @@ from pathlib import Path
 from endf_parserpy import (
     EndfParserFactory,
     parse_tape,
+    parse_tape_file,
     iter_parse_tape,
     write_tape,
+    write_tape_file,
     FailedMaterial,
 )
 from endf_parserpy.tape import split_materials, TapeStructureError
@@ -42,6 +44,11 @@ def _make_multi(single, n=2):
     tpid, tend = single[0], single[-1]
     body = single[1:-1]
     return [tpid] + body * n + [tend], tpid, body, tend
+
+
+def _text(lines):
+    """Join tape lines into the single-string form parse_tape expects."""
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
@@ -105,11 +112,11 @@ def test_verbatim_roundtrip(parser):
     single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
     multi, tpid, body, tend = _make_multi(single, n=2)
 
-    materials = parse_tape(multi, parser=parser, exclude=RAW_EXCLUDE)
+    materials = parse_tape(_text(multi), parser=parser, exclude=RAW_EXCLUDE)
     assert len(materials) == 2
 
     out = write_tape(materials, parser=parser)
-    assert out == multi
+    assert out.splitlines() == multi
 
 
 def test_parse_tape_matches_individual(parser):
@@ -117,7 +124,7 @@ def test_parse_tape_matches_individual(parser):
     multi, *_ = _make_multi(single, n=2)
 
     chunks = list(split_materials(multi))
-    materials = parse_tape(multi, parser=parser, exclude=RAW_EXCLUDE)
+    materials = parse_tape(_text(multi), parser=parser, exclude=RAW_EXCLUDE)
     assert len(materials) == len(chunks) == 2
     for chunk, material in zip(chunks, materials):
         assert material == parser.parse(chunk, exclude=RAW_EXCLUDE)
@@ -127,7 +134,7 @@ def test_full_parse_yields_material_dicts(parser):
     single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
     multi, *_ = _make_multi(single, n=3)
 
-    materials = parse_tape(multi, parser=parser)
+    materials = parse_tape(_text(multi), parser=parser)
     assert len(materials) == 3
     for material in materials:
         assert not isinstance(material, FailedMaterial)
@@ -139,25 +146,25 @@ def test_iter_parse_tape_matches_parse_tape(parser):
     single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
     multi, *_ = _make_multi(single, n=2)
 
-    streamed = list(iter_parse_tape(multi, parser=parser, exclude=RAW_EXCLUDE))
-    eager = parse_tape(multi, parser=parser, exclude=RAW_EXCLUDE)
+    streamed = list(iter_parse_tape(_text(multi), parser=parser, exclude=RAW_EXCLUDE))
+    eager = parse_tape(_text(multi), parser=parser, exclude=RAW_EXCLUDE)
     assert streamed == eager
 
 
-def test_write_tape_to_file(parser, tmp_path):
+def test_write_tape_file_roundtrip(parser, tmp_path):
     single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
     multi, *_ = _make_multi(single, n=2)
-    materials = parse_tape(multi, parser=parser, exclude=RAW_EXCLUDE)
+    materials = parse_tape(_text(multi), parser=parser, exclude=RAW_EXCLUDE)
 
     out_file = tmp_path / "tape.endf"
-    write_tape(materials, out_file, parser=parser)
+    write_tape_file(materials, out_file, parser=parser)
     assert out_file.exists()
 
     with pytest.raises(FileExistsError):
-        write_tape(materials, out_file, parser=parser)
-    write_tape(materials, out_file, parser=parser, overwrite=True)
+        write_tape_file(materials, out_file, parser=parser)
+    write_tape_file(materials, out_file, parser=parser, overwrite=True)
 
-    reparsed = parse_tape(out_file, parser=parser, exclude=RAW_EXCLUDE)
+    reparsed = parse_tape_file(out_file, parser=parser, exclude=RAW_EXCLUDE)
     assert reparsed == materials
 
 
@@ -184,7 +191,7 @@ def test_on_error_mark(parser):
     bad_body = _corrupt_first_record(body)
     multi = [tpid] + body + bad_body + [tend]
 
-    materials = parse_tape(multi, parser=parser, on_error="mark")
+    materials = parse_tape(_text(multi), parser=parser, on_error="mark")
     assert len(materials) == 2
     assert not isinstance(materials[0], FailedMaterial)
     assert isinstance(materials[1], FailedMaterial)
@@ -199,14 +206,14 @@ def test_on_error_raise(parser):
     multi = [tpid] + body + _corrupt_first_record(body) + [tend]
 
     with pytest.raises(Exception):
-        parse_tape(multi, parser=parser, on_error="raise")
+        parse_tape(_text(multi), parser=parser, on_error="raise")
 
 
 def test_on_error_invalid_value(parser):
     single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
     multi, *_ = _make_multi(single, n=2)
     with pytest.raises(ValueError, match="on_error"):
-        parse_tape(multi, parser=parser, on_error="bogus")
+        parse_tape(_text(multi), parser=parser, on_error="bogus")
 
 
 def test_failed_material_roundtrips_verbatim(parser):
@@ -217,9 +224,9 @@ def test_failed_material_roundtrips_verbatim(parser):
     multi = [tpid] + body + bad_body + [tend]
 
     # full parse, so the corrupted material genuinely fails to parse
-    materials = parse_tape(multi, parser=parser, on_error="mark")
+    materials = parse_tape(_text(multi), parser=parser, on_error="mark")
     failed = materials[1]
     assert isinstance(failed, FailedMaterial)
 
     # a FailedMaterial is written back verbatim from its stored lines
-    assert write_tape([failed], parser=parser) == failed.raw_lines
+    assert write_tape([failed], parser=parser).splitlines() == failed.raw_lines

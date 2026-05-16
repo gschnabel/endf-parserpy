@@ -11,8 +11,9 @@ same material at several temperatures.
 
 The :func:`~endf_parserpy.parse_tape`,
 :func:`~endf_parserpy.iter_parse_tape` and
-:func:`~endf_parserpy.write_tape` functions read and write
-such files in terms of ordinary material dictionaries. The
+:func:`~endf_parserpy.write_tape` functions (and their
+``_file`` variants) read and write such files in terms of
+ordinary material dictionaries. The
 :class:`~endf_parserpy.EndfFile` class instead provides lazy,
 memory-bounded access: the file is indexed on construction
 and individual sections are parsed only when accessed.

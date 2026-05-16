@@ -20,9 +20,10 @@ parsing engine is used unchanged.
 
 Each material is represented by a :class:`_MaterialSlot` that carries an
 edit overlay. Sections can be replaced, added or deleted and materials
-can be deleted, appended or reordered; :meth:`EndfFile.save` writes the
-edited tape back out. Untouched sections are written verbatim from disk,
-so an unedited round trip is byte-exact.
+can be deleted, appended or reordered; :meth:`EndfFile.export` writes
+the edited tape back out and :meth:`EndfFile.to_string` returns it as
+text. Untouched sections are written verbatim from disk, so an unedited
+round trip is byte-exact.
 """
 
 import os
@@ -47,7 +48,7 @@ from .errors import (
 )
 from .index import TapeIndex
 from .material import MaterialView, _MaterialSlot
-from .operations import write_tape
+from .operations import write_tape, write_tape_file
 from .splitter import _control_numbers
 from .views import (
     _FrozenMapping,
@@ -119,7 +120,7 @@ class FailedSection:
     When the :class:`EndfFile` was opened with ``on_error="mark"`` a
     section that fails to parse is kept as a :class:`FailedSection` so
     that the bulk operations (:meth:`~EndfFile.query`,
-    :meth:`~EndfFile.build_index`, :meth:`~EndfFile.save`) can skip it
+    :meth:`~EndfFile.build_index`, :meth:`~EndfFile.export`) can skip it
     or write it back verbatim instead of aborting. Accessing such a
     section directly (``endf_file[path]`` or ``material[mf, mt]``)
     raises :class:`SectionParseError`, with this object's
@@ -164,7 +165,7 @@ class EndfFile:
             material = endf_file[0]         # a MaterialView
             section = material[3, 2]        # parsed MF=3/MT=2 section
             material[3, 2] = section        # edit it back in
-            endf_file.save("edited.endf")
+            endf_file.export("edited.endf")
 
     Parameters
     ----------
@@ -191,9 +192,9 @@ class EndfFile:
         the parser's writer immediately, so a malformed edit raises at
         the offending assignment, and a retrieved section is a read-only
         (frozen) view. ``"deferred"`` accepts every edit, marking the
-        section dirty, and checks conformity only at :meth:`save` or
-        :meth:`verify`; a retrieved section is then a live write-through
-        view.
+        section dirty, and checks conformity only at :meth:`export` /
+        :meth:`to_string` or :meth:`verify`; a retrieved section is then
+        a live write-through view.
     verify_source : bool
         If true, the file's size and mtime are checked against the
         index before every disk read; a change raises
@@ -246,17 +247,17 @@ class EndfFile:
             self._preload(parse=True)
 
     def _ensure_valid(self):
-        """Raise if the object was invalidated by a save onto its source.
+        """Raise if the object was invalidated by an export onto its source.
 
-        After :meth:`save` overwrites the file the :class:`EndfFile` was
-        opened from, the structural index no longer matches the bytes on
-        disk, so lazily reading any untouched section would return
-        garbage. The object is therefore invalidated; every data
+        After :meth:`export` overwrites the file the :class:`EndfFile`
+        was opened from, the structural index no longer matches the
+        bytes on disk, so lazily reading any untouched section would
+        return garbage. The object is therefore invalidated; every data
         operation raises until the file is re-opened.
         """
         if self._invalidated:
             raise StaleSourceError(
-                f"this EndfFile was invalidated when save() overwrote its "
+                f"this EndfFile was invalidated when export() overwrote its "
                 f"source file {self._path!r}; its structural index no longer "
                 f"matches the file on disk -- re-open it with "
                 f"EndfFile({self._path!r})"
@@ -808,7 +809,8 @@ class EndfFile:
         are written verbatim and are not checked.
 
         Under ``check_edits="deferred"`` this is the explicit conformity
-        check that :meth:`save` performs implicitly; under ``"eager"``
+        check that :meth:`export` and :meth:`to_string` perform
+        implicitly; under ``"eager"``
         every edit was already checked at write time, so it is a near
         no-op but remains harmless to call.
         """
@@ -942,59 +944,72 @@ class EndfFile:
             material.setdefault(mf, {})[mt] = section
         return material
 
-    def save(self, out=None, *, overwrite=False):
-        """Write the (possibly edited) tape.
+    def _assembled_materials(self):
+        """Run the deferred conformity check and assemble every material.
 
-        With ``out=None`` the assembled tape lines are returned. Given a
-        path, the tape is written there via a temporary file and an
-        atomic replace.
-
-        Untouched sections are written verbatim from disk; edited and
-        added sections are rendered by the parser.
-
-        Under ``check_edits="deferred"`` the edited sections are checked
-        for recipe conformity first (the implicit :meth:`verify`); a
-        non-conformant section raises :class:`SectionRenderError` before
-        anything is written. Under ``"eager"`` every edit was already
-        checked when it was made.
-
-        Writing onto the file the :class:`EndfFile` was opened from is
-        permitted, but it leaves the in-memory structural index stale
-        (the byte offsets of untouched sections have moved). The object
-        is therefore *invalidated*: every subsequent operation raises
-        :class:`StaleSourceError`, and the file must be re-opened with a
-        new :class:`EndfFile` to continue. Saving to any other path
-        leaves the object usable.
+        Shared by :meth:`to_string` and :meth:`export`. Under
+        ``check_edits="deferred"`` the edited sections are render-checked
+        first (the implicit :meth:`verify`); a non-conformant section
+        raises :class:`SectionRenderError` before anything is produced.
+        Under ``"eager"`` every edit was already checked when it was
+        made.
         """
-        self._ensure_valid()
         if self._check_edits == "deferred":
             report = self.verify()
             if report:
                 position, mf, mt, exc = report[0]
                 raise SectionRenderError(
-                    f"cannot save: the edited MF={mf}/MT={mt} section of the "
-                    f"material at position {position} does not render to "
-                    f"valid ENDF-6 text ({len(report)} edited section(s) "
-                    "failed to render); call verify() for the full report"
+                    f"the edited MF={mf}/MT={mt} section of the material at "
+                    f"position {position} does not render to valid ENDF-6 "
+                    f"text ({len(report)} edited section(s) failed to "
+                    "render); call verify() for the full report"
                 ) from exc.__cause__
-        materials = [self._assemble(slot) for slot in self._materials]
-        if out is None:
-            return write_tape(materials, parser=self._parser)
-        out = os.fspath(out)
-        if os.path.exists(out) and not overwrite:
+        return [self._assemble(slot) for slot in self._materials]
+
+    def to_string(self):
+        """Return the (possibly edited) tape as an ENDF-6 formatted string.
+
+        Untouched sections appear verbatim from disk (so an unedited
+        tape is reproduced byte for byte) and edited or added sections
+        are rendered by the parser. The result ends with a newline; use
+        :meth:`str.splitlines` if a list of lines is needed. To write a
+        file instead, use :meth:`export`.
+        """
+        self._ensure_valid()
+        return write_tape(self._assembled_materials(), parser=self._parser)
+
+    def export(self, path, *, overwrite=False):
+        """Write the (possibly edited) tape to a file.
+
+        The tape is written via a temporary file and an atomic replace.
+        Untouched sections are written verbatim from disk; edited and
+        added sections are rendered by the parser. An existing file is
+        only overwritten when ``overwrite=True``.
+
+        Exporting onto the file the :class:`EndfFile` was opened from is
+        permitted, but it leaves the in-memory structural index stale
+        (the byte offsets of untouched sections have moved). The object
+        is therefore *invalidated*: every subsequent operation raises
+        :class:`StaleSourceError`, and the file must be re-opened with a
+        new :class:`EndfFile` to continue. Exporting to any other path
+        leaves the object usable.
+        """
+        self._ensure_valid()
+        materials = self._assembled_materials()
+        path = os.fspath(path)
+        if os.path.exists(path) and not overwrite:
             raise FileExistsError(
-                f"file {out} already exists; pass overwrite=True to replace it"
+                f"file {path} already exists; pass overwrite=True to replace it"
             )
-        onto_source = os.path.realpath(out) == os.path.realpath(self._path)
-        tmp = out + ".endfparserpy-tmp"
-        write_tape(materials, tmp, parser=self._parser, overwrite=True)
-        os.replace(tmp, out)
+        onto_source = os.path.realpath(path) == os.path.realpath(self._path)
+        tmp = path + ".endfparserpy-tmp"
+        write_tape_file(materials, tmp, parser=self._parser, overwrite=True)
+        os.replace(tmp, path)
         if onto_source:
             # the file the index describes has just been rewritten; the
             # offsets of untouched sections no longer match -- this object
             # can no longer read from disk safely (see _ensure_valid)
             self._invalidated = True
-        return None
 
     # -- memory management ---------------------------------------------
 
