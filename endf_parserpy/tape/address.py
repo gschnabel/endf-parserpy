@@ -86,8 +86,13 @@ class EndfMaterialPath:
             raise ValueError("an EndfMaterialPath must not be empty")
         self._parse_material(parts[0])
         rest = parts[1:]
-        self.mf = int(rest[0]) if len(rest) >= 1 else None
-        self.mt = int(rest[1]) if len(rest) >= 2 else None
+        try:
+            self.mf = int(rest[0]) if len(rest) >= 1 else None
+            self.mt = int(rest[1]) if len(rest) >= 2 else None
+        except ValueError:
+            raise ValueError(
+                f"invalid material path {self._spec!r}: MF and MT must be integers"
+            ) from None
         self.subpath = EndfPath("/".join(rest[2:])) if len(rest) > 2 else None
 
     def _parse_material(self, token):

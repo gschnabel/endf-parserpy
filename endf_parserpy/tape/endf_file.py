@@ -102,11 +102,12 @@ def _strip_send(lines):
 
 
 class _CurrentMaterials:
-    """Adapter exposing the current slot list with a TapeIndex-like API.
+    """Adapter over the current slot list for material-selector resolution.
 
-    Lets :meth:`EndfMaterialPath.resolve_material` resolve against the
-    *current* (possibly edited) material order rather than the
-    on-disk index.
+    Exposes the ``__len__`` and ``by_mat`` that
+    :meth:`EndfMaterialPath.resolve_material` needs, so a material
+    selector resolves against the *current* (possibly edited) material
+    order rather than the on-disk index.
     """
 
     def __init__(self, slots):
@@ -117,9 +118,6 @@ class _CurrentMaterials:
 
     def by_mat(self, mat):
         return [i for i, s in enumerate(self._slots) if s.mat == mat]
-
-    def by_za(self, za):
-        return [i for i, s in enumerate(self._slots) if s.za == za]
 
 
 class FailedSection(_FailedUnit):
@@ -1215,9 +1213,10 @@ class EndfFile:
     # -- pickling ------------------------------------------------------
     #
     # The index and the material slots (which carry any edits) are
-    # pickled; the lock and caches are not, and the parser is recreated
-    # from its backend name. Custom parser options are therefore not
-    # preserved across pickling.
+    # pickled; the lock, caches and named secondary indexes are not, and
+    # the parser is recreated from its backend name. Custom parser
+    # options are therefore not preserved across pickling, and any
+    # secondary indexes must be rebuilt with build_index() afterwards.
 
     def __getstate__(self):
         return {

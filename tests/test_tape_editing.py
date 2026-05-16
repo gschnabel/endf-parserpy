@@ -191,6 +191,14 @@ def test_set_section_type_validation(tmp_path, parser):
         endf_file[0][1, 451] = 42
 
 
+def test_malformed_section_path_raises_descriptive_error(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    # a non-integer MF/MT in a material path gives a descriptive error,
+    # not a bare int() ValueError
+    with pytest.raises(ValueError, match="MF and MT must be integers"):
+        endf_file["#0/x/2"]
+
+
 # --------------------------------------------------------------------------
 # material editing
 # --------------------------------------------------------------------------
