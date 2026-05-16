@@ -3,7 +3,8 @@ import pytest
 from pathlib import Path
 
 from endf_parserpy import EndfParserFactory, EndfFile
-from endf_parserpy.tape import SectionRenderError, TapeStructureError
+from endf_parserpy.tape import SectionRenderError
+from endf_parserpy.tape.splitter import TEND_LINE
 
 
 TESTDATA = Path(__file__).parent / "testdata"
@@ -74,15 +75,19 @@ def test_export_cleans_up_temp_file_on_failure(tmp_path, parser):
     assert not (tmp_path / "adir.endfparserpy-tmp").exists()
 
 
-def test_export_empty_tape_is_rejected(tmp_path, parser):
+def test_export_empty_tape(tmp_path, parser):
     endf_file, _ = _open(tmp_path, parser, [CU])
+    original_tpid = endf_file.index.tpid_line
     del endf_file[0]
     assert len(endf_file) == 0
-    # a tape with no materials has no TPID and is not valid ENDF
-    with pytest.raises(TapeStructureError, match="no materials"):
-        endf_file.export(tmp_path / "out.endf")
-    with pytest.raises(TapeStructureError, match="no materials"):
-        endf_file.to_string()
+    # an EndfFile with every material deleted writes a valid empty
+    # tape: its original tape head (TPID) followed by the tape end
+    assert endf_file.to_string().splitlines() == [original_tpid, TEND_LINE]
+    out = tmp_path / "out.endf"
+    endf_file.export(out)
+    reopened = EndfFile(out, parser=parser)
+    assert len(reopened) == 0
+    assert reopened.index.tpid_line == original_tpid
 
 
 def test_strip_send_only_strips_a_real_send():

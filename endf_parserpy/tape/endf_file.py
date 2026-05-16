@@ -45,7 +45,6 @@ from .errors import (
     SectionParseError,
     SectionRenderError,
     StaleSourceError,
-    TapeStructureError,
 )
 from .index import TapeIndex
 from .material import MaterialView, _MaterialSlot
@@ -1060,19 +1059,14 @@ class EndfFile:
                 "invalid_edits() for the full report"
             ) from exc.__cause__
 
-    def _check_writable(self):
-        """Raise before output if there is nothing valid to write.
+    def _empty_tape_text(self):
+        """The ENDF-6 text of this tape once every material is removed.
 
-        Render-checks the deferred edits and rejects a tape whose
-        materials have all been deleted -- a tape with no materials has
-        no TPID record and is not valid ENDF.
+        A tape with no materials is just its tape head (TPID) followed
+        by the tape end (TEND). The original TPID is kept, so an
+        emptied tape retains its identity.
         """
-        self._check_deferred_edits()
-        if not self._materials:
-            raise TapeStructureError(
-                "cannot write a tape with no materials; every material has "
-                "been deleted from this EndfFile"
-            )
+        return self._index.tpid_line + "\n" + TEND_LINE + "\n"
 
     def _output_materials(self):
         """Yield each material assembled and ready for :func:`write_tape`.
@@ -1092,14 +1086,18 @@ class EndfFile:
         Untouched sections appear verbatim from disk (so an unedited
         tape is reproduced byte for byte) and edited or added sections
         are rendered by the parser. The result ends with a newline; use
-        :meth:`str.splitlines` if a list of lines is needed.
+        :meth:`str.splitlines` if a list of lines is needed. A tape from
+        which every material has been deleted is written as its tape
+        head (TPID) followed by the tape end (TEND).
 
         This necessarily builds the whole tape in memory; for a large
         tape, write it to a file with :meth:`export`, which is
         memory-bounded.
         """
         self._ensure_valid()
-        self._check_writable()
+        self._check_deferred_edits()
+        if not self._materials:
+            return self._empty_tape_text()
         with self._read_session():
             return write_tape(self._output_materials(), parser=self._parser)
 
@@ -1111,7 +1109,9 @@ class EndfFile:
         material regardless of the tape size. Untouched sections are
         taken verbatim from disk (they are not parsed); edited and added
         sections are rendered by the parser. An existing file is only
-        overwritten when ``overwrite=True``.
+        overwritten when ``overwrite=True``. A tape from which every
+        material has been deleted is written as its tape head (TPID)
+        followed by the tape end (TEND).
 
         Exporting onto the file the :class:`EndfFile` was opened from is
         permitted, but it leaves the in-memory structural index stale
@@ -1122,7 +1122,7 @@ class EndfFile:
         leaves the object usable.
         """
         self._ensure_valid()
-        self._check_writable()
+        self._check_deferred_edits()
         path = os.fspath(path)
         if os.path.exists(path) and not overwrite:
             raise FileExistsError(
@@ -1131,10 +1131,18 @@ class EndfFile:
         onto_source = os.path.realpath(path) == os.path.realpath(self._path)
         tmp = path + ".endfparserpy-tmp"
         try:
-            with self._read_session():
-                write_tape_file(
-                    self._output_materials(), tmp, parser=self._parser, overwrite=True
-                )
+            if self._materials:
+                with self._read_session():
+                    write_tape_file(
+                        self._output_materials(),
+                        tmp,
+                        parser=self._parser,
+                        overwrite=True,
+                    )
+            else:
+                # every material was deleted: a valid TPID + TEND tape
+                with open(tmp, "w") as fh:
+                    fh.write(self._empty_tape_text())
             os.replace(tmp, path)
         except BaseException:
             # a failed or interrupted write must not leave the temporary
