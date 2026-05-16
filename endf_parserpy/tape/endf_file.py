@@ -113,10 +113,17 @@ class _CurrentMaterials:
 
 
 class FailedSection:
-    """Placeholder for a section that could not be parsed.
+    """Internal placeholder for a section that could not be parsed.
 
-    Returned by section access when the :class:`EndfFile` was opened
-    with ``on_error="mark"`` and the section failed to parse.
+    When the :class:`EndfFile` was opened with ``on_error="mark"`` a
+    section that fails to parse is kept as a :class:`FailedSection` so
+    that the bulk operations (:meth:`~EndfFile.query`,
+    :meth:`~EndfFile.build_index`, :meth:`~EndfFile.save`) can skip it
+    or write it back verbatim instead of aborting. Accessing such a
+    section directly (``endf_file[path]`` or ``material[mf, mt]``)
+    raises :class:`SectionParseError`, with this object's
+    :attr:`exception` kept as the cause; a :class:`FailedSection` is
+    therefore never handed back to the caller.
 
     Attributes
     ----------
@@ -231,10 +238,28 @@ class EndfFile:
         self._secondary_indexes = {}
         self._lock = threading.RLock()
         self._read_fh = None
+        self._invalidated = False
         if mode == "load_raw":
             self._preload(parse=False)
         elif mode == "parse_all":
             self._preload(parse=True)
+
+    def _ensure_valid(self):
+        """Raise if the object was invalidated by a save onto its source.
+
+        After :meth:`save` overwrites the file the :class:`EndfFile` was
+        opened from, the structural index no longer matches the bytes on
+        disk, so lazily reading any untouched section would return
+        garbage. The object is therefore invalidated; every data
+        operation raises until the file is re-opened.
+        """
+        if self._invalidated:
+            raise StaleSourceError(
+                f"this EndfFile was invalidated when save() overwrote its "
+                f"source file {self._path!r}; its structural index no longer "
+                f"matches the file on disk -- re-open it with "
+                f"EndfFile({self._path!r})"
+            )
 
     def _preload(self, parse):
         # a whole-tape operation: read every section through a single
@@ -255,6 +280,7 @@ class EndfFile:
     # note docs/design/endf_file_path_addressing.md.
 
     def __len__(self):
+        self._ensure_valid()
         return len(self._materials)
 
     def _material_view(self, slot):
@@ -281,6 +307,7 @@ class EndfFile:
         return position, mp.mf, mp.mt, mp.subpath
 
     def __getitem__(self, key):
+        self._ensure_valid()
         if isinstance(key, int):
             return self._material_view(self._materials[key])
         if not isinstance(key, (str, EndfMaterialPath)):
@@ -297,6 +324,7 @@ class EndfFile:
         return self._view(slot, mf, mt, section, subpath)
 
     def __setitem__(self, key, value):
+        self._ensure_valid()
         if isinstance(key, int):
             raise ValueError(
                 "a whole material cannot be assigned by position; use "
@@ -321,6 +349,7 @@ class EndfFile:
 
     def __delitem__(self, key):
         """Delete the material, section or field addressed by ``key``."""
+        self._ensure_valid()
         if isinstance(key, int):
             with self._lock:
                 del self._materials[key]
@@ -348,6 +377,7 @@ class EndfFile:
         propagates its :class:`ValueError` / :class:`AmbiguousMaterialError`
         rather than being answered ``False``.
         """
+        self._ensure_valid()
         if isinstance(key, int):
             return -len(self._materials) <= key < len(self._materials)
         if not isinstance(key, (str, EndfMaterialPath)):
@@ -372,6 +402,7 @@ class EndfFile:
         return section_has(section, subpath)
 
     def __iter__(self):
+        self._ensure_valid()
         for position in range(len(self._materials)):
             yield self._material_view(self._materials[position])
 
@@ -406,6 +437,7 @@ class EndfFile:
         MaterialView
             A view of the appended material.
         """
+        self._ensure_valid()
         slot = _MaterialSlot(original_position=None, mat=mat, za=za, awr=awr)
         for mf, mtdic in material.items():
             if mf == 0:
@@ -422,6 +454,7 @@ class EndfFile:
         ``order`` is a permutation of ``range(len(self))``: the material
         currently at ``order[i]`` moves to position ``i``.
         """
+        self._ensure_valid()
         order = list(order)
         if sorted(order) != list(range(len(self._materials))):
             raise ValueError("order must be a permutation of range(len(self))")
@@ -573,6 +606,7 @@ class EndfFile:
         return sorted(self._slot_section_keys_set(slot))
 
     def _get_slot_section(self, slot, mf, mt):
+        self._ensure_valid()
         key = (mf, mt)
         if key in slot.overlay:
             return slot.overlay[key]
@@ -586,6 +620,7 @@ class EndfFile:
         return self._get_section(slot.original_position, mf, mt)
 
     def _set_slot_section(self, slot, mf, mt, value):
+        self._ensure_valid()
         if isinstance(value, _SectionView):
             value = value.detach()
         if not isinstance(value, (Mapping, list)):
@@ -625,6 +660,7 @@ class EndfFile:
                 slot.deleted.discard((mf, mt))
 
     def _delete_slot_section(self, slot, mf, mt):
+        self._ensure_valid()
         with self._lock:
             if (mf, mt) not in self._slot_section_keys_set(slot):
                 raise KeyError(f"this material has no MF={mf}/MT={mt} section")
@@ -874,7 +910,7 @@ class EndfFile:
 
         With ``out=None`` the assembled tape lines are returned. Given a
         path, the tape is written there via a temporary file and an
-        atomic replace, so saving back onto the source file is safe.
+        atomic replace.
 
         Untouched sections are written verbatim from disk; edited and
         added sections are rendered by the parser.
@@ -884,7 +920,16 @@ class EndfFile:
         non-conformant section raises :class:`SectionRenderError` before
         anything is written. Under ``"eager"`` every edit was already
         checked when it was made.
+
+        Writing onto the file the :class:`EndfFile` was opened from is
+        permitted, but it leaves the in-memory structural index stale
+        (the byte offsets of untouched sections have moved). The object
+        is therefore *invalidated*: every subsequent operation raises
+        :class:`StaleSourceError`, and the file must be re-opened with a
+        new :class:`EndfFile` to continue. Saving to any other path
+        leaves the object usable.
         """
+        self._ensure_valid()
         if self._check_edits == "deferred":
             report = self.verify()
             if report:
@@ -903,9 +948,15 @@ class EndfFile:
             raise FileExistsError(
                 f"file {out} already exists; pass overwrite=True to replace it"
             )
+        onto_source = os.path.realpath(out) == os.path.realpath(self._path)
         tmp = out + ".endfparserpy-tmp"
         write_tape(materials, tmp, parser=self._parser, overwrite=True)
         os.replace(tmp, out)
+        if onto_source:
+            # the file the index describes has just been rewritten; the
+            # offsets of untouched sections no longer match -- this object
+            # can no longer read from disk safely (see _ensure_valid)
+            self._invalidated = True
         return None
 
     # -- memory management ---------------------------------------------
@@ -952,7 +1003,8 @@ class EndfFile:
         return False
 
     def __repr__(self):
-        return f"<EndfFile {self._path!r}: {len(self._materials)} materials>"
+        state = " (invalidated)" if self._invalidated else ""
+        return f"<EndfFile {self._path!r}: {len(self._materials)} " f"materials{state}>"
 
     # -- pickling ------------------------------------------------------
     #
@@ -967,6 +1019,7 @@ class EndfFile:
             "backend": self._backend,
             "on_error": self._on_error,
             "check_edits": self._check_edits,
+            "invalidated": self._invalidated,
             "verify_source": self._verify_source,
             "raw_cache_bytes": self._raw_cache.max_bytes,
             "parsed_cache_bytes": self._section_cache.max_bytes,
@@ -980,6 +1033,7 @@ class EndfFile:
         self._parser = EndfParserFactory.create(select=state["backend"])
         self._on_error = state["on_error"]
         self._check_edits = state.get("check_edits", "eager")
+        self._invalidated = state.get("invalidated", False)
         self._verify_source = state["verify_source"]
         self._index = state["index"]
         self._materials = state["materials"]

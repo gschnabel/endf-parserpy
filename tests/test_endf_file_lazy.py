@@ -8,7 +8,6 @@ from endf_parserpy import EndfParserFactory, EndfFile
 from endf_parserpy.tape import (
     split_materials,
     MaterialView,
-    FailedSection,
     AmbiguousMaterialError,
     SectionParseError,
     StaleSourceError,
@@ -133,9 +132,10 @@ def test_weakref_preserves_identity(tape_file, parser):
     for material in endf_file:
         for key in material.sections():
             material[key]
-    # the held section is gone from the strong cache but still alive,
-    # so it is returned again with its identity intact
-    assert endf_file[0][1, 451] is held
+    # a re-access yields a fresh section view, but the canonical parsed
+    # section it wraps is gone from the strong cache yet still alive, so
+    # it is returned again with its identity intact
+    assert endf_file[0][1, 451]._target is held._target
 
 
 def test_unload_clears_cache(tape_file, parser):
@@ -210,12 +210,16 @@ def test_by_za_and_find(tape_file, parser):
 def test_on_error_mark(multi_lines, tmp_path, parser):
     path = _corrupt_tape(multi_lines, tmp_path)
     endf_file = EndfFile(path, parser=parser, on_error="mark")
-    section = endf_file[0][1, 451]
-    assert isinstance(section, FailedSection)
-    assert section.exception is not None
-    assert (section.mf, section.mt) == (1, 451)
-    # an intact material is unaffected
-    assert not isinstance(endf_file[2][1, 451], FailedSection)
+    # accessing the corrupt section raises SectionParseError -- the same
+    # as on_error="raise" -- but with "mark" the failure is contained:
+    with pytest.raises(SectionParseError, match="MF=1/MT=451"):
+        endf_file[0][1, 451]
+    # an intact material is unaffected ...
+    assert endf_file[2][1, 451]["AWR"] is not None
+    # ... and the corrupt material round-trips verbatim through save()
+    out = tmp_path / "out.endf"
+    endf_file.save(out)
+    assert len(EndfFile(out, parser=parser)) == len(endf_file)
 
 
 def test_on_error_raise(multi_lines, tmp_path, parser):

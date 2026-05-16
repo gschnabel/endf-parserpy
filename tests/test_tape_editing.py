@@ -181,6 +181,30 @@ def test_save_to_same_path(tmp_path, parser):
     assert len(reopened) == 1
 
 
+def test_save_onto_source_invalidates(tmp_path, parser):
+    from endf_parserpy.tape import StaleSourceError
+
+    endf_file, path = _open(tmp_path, parser, [CU, ZN])
+    endf_file.save(path, overwrite=True)
+    # the in-memory index no longer matches the rewritten file
+    with pytest.raises(StaleSourceError):
+        len(endf_file)
+    with pytest.raises(StaleSourceError):
+        endf_file[0]
+    with pytest.raises(StaleSourceError):
+        endf_file.save(tmp_path / "elsewhere.endf")
+    assert "invalidated" in repr(endf_file)
+
+
+def test_save_to_other_path_keeps_object_valid(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    endf_file.save(tmp_path / "copy.endf")
+    # saving elsewhere is a plain export and leaves the object usable
+    assert len(endf_file) == 1
+    endf_file.save()  # out=None never invalidates either
+    assert len(endf_file) == 1
+
+
 # --------------------------------------------------------------------------
 # view identity through structural edits
 # --------------------------------------------------------------------------

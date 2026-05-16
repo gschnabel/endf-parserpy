@@ -223,7 +223,19 @@ unedited tape is reproduced byte for byte:
 .. code:: Python
 
    endf_file.save('edited.endf')                 # write to a new file
-   endf_file.save('tape.endf', overwrite=True)   # or overwrite the source
+   lines = endf_file.save()                      # or obtain the lines
+
+Saving onto the very file the :class:`~endf_parserpy.EndfFile`
+was opened from is allowed, but it leaves the in-memory index
+out of step with the rewritten file. The object is therefore
+*invalidated*: any further use raises
+:class:`~endf_parserpy.tape.StaleSourceError`, and the file
+must be re-opened to continue working with it.
+
+.. code:: Python
+
+   endf_file.save('tape.endf', overwrite=True)   # overwrites the source
+   endf_file = EndfFile('tape.endf')             # re-open to continue
 
 .. note::
 
