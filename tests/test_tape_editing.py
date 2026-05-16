@@ -63,6 +63,32 @@ def test_export_to_file(tmp_path, parser):
     endf_file.export(out, overwrite=True)
 
 
+def test_export_peak_memory_is_bounded(tmp_path, parser):
+    # export streams material by material, so its peak memory is bounded
+    # by a single material -- a 4x larger tape does not need 4x the heap
+    import tracemalloc
+
+    def peak_exporting(n_materials):
+        path = tmp_path / f"tape{n_materials}.endf"
+        path.write_text("\n".join(_canonical_tape(parser, [CU] * n_materials)) + "\n")
+        endf_file = EndfFile(
+            path, parser=parser, parsed_cache_bytes=1 << 20, raw_cache_bytes=1 << 20
+        )
+        out = tmp_path / f"out{n_materials}.endf"
+        tracemalloc.start()
+        try:
+            endf_file.export(out)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert len(EndfFile(out, parser=parser)) == n_materials
+        return peak
+
+    small = peak_exporting(2)
+    large = peak_exporting(8)
+    assert large < small * 2
+
+
 # --------------------------------------------------------------------------
 # section editing
 # --------------------------------------------------------------------------

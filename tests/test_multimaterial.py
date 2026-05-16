@@ -230,3 +230,51 @@ def test_failed_material_roundtrips_verbatim(parser):
 
     # a FailedMaterial is written back verbatim from its stored lines
     assert write_tape([failed], parser=parser).splitlines() == failed.raw_lines
+
+
+# --------------------------------------------------------------------------
+# verbatim assembly and streaming writes
+# --------------------------------------------------------------------------
+
+
+def test_write_tape_verbatim_materials(parser):
+    # a material given as a plain list of ENDF lines is written verbatim,
+    # with no intermediate parse or render
+    single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
+    body = single[1:-1]  # the material's records, through its MEND
+
+    # single is a one-material tape (TPID .. records .. TEND); feeding it
+    # as a list assembles a verbatim copy, and the per-material TPID/TEND
+    # framing is stripped and re-emitted once
+    tape = write_tape([single, single], parser=parser).splitlines()
+    assert tape[0] == single[0]  # the TPID, once
+    assert tape[1 : 1 + len(body)] == body  # first material, byte-for-byte
+    assert tape[1 + len(body) : 1 + 2 * len(body)] == body  # second, the same
+    assert len(parse_tape("\n".join(tape), parser=parser, exclude=RAW_EXCLUDE)) == 2
+
+
+def test_write_tape_file_accepts_generator(parser, tmp_path):
+    # write_tape_file consumes any iterable, including a generator
+    single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
+    from_list = tmp_path / "list.endf"
+    from_gen = tmp_path / "gen.endf"
+    write_tape_file([single, single, single], from_list, parser=parser, overwrite=True)
+    write_tape_file((single for _ in range(3)), from_gen, parser=parser, overwrite=True)
+    assert from_list.read_text() == from_gen.read_text()
+
+
+def test_write_tape_file_is_streaming(parser, tmp_path):
+    # a generator of materials is consumed one at a time: the whole tape
+    # is never held in memory, so the peak heap stays far below its size
+    import tracemalloc
+
+    single = _canonical_single(parser, TESTDATA / "n_2925_29-Cu-63.endf")
+    out = tmp_path / "big.endf"
+    tracemalloc.start()
+    try:
+        write_tape_file((single for _ in range(30)), out, parser=parser, overwrite=True)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < out.stat().st_size / 2
+    assert len(parse_tape_file(out, parser=parser, exclude=RAW_EXCLUDE)) == 30

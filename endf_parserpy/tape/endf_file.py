@@ -945,27 +945,37 @@ class EndfFile:
             material.setdefault(mf, {})[mt] = section
         return material
 
-    def _assembled_materials(self):
-        """Run the deferred conformity check and assemble every material.
+    def _check_deferred_edits(self):
+        """Render-check the edits before output (deferred mode only).
 
-        Shared by :meth:`to_string` and :meth:`export`. Under
-        ``check_edits="deferred"`` the edited sections are render-checked
-        first (the implicit :meth:`invalid_edits`); a non-conformant
-        section raises :class:`SectionRenderError` before anything is
-        produced. Under ``"eager"`` every edit was already checked when
-        it was made.
+        Under ``check_edits="deferred"`` a non-conformant edited section
+        raises :class:`SectionRenderError` here, before any output is
+        produced; under ``"eager"`` every edit was already checked when
+        it was made, so this is a no-op.
         """
-        if self._check_edits == "deferred":
-            report = self.invalid_edits()
-            if report:
-                position, mf, mt, exc = report[0]
-                raise SectionRenderError(
-                    f"the edited MF={mf}/MT={mt} section of the material at "
-                    f"position {position} does not render to valid ENDF-6 "
-                    f"text ({len(report)} edited section(s) failed to "
-                    "render); call invalid_edits() for the full report"
-                ) from exc.__cause__
-        return [self._assemble(slot) for slot in self._materials]
+        if self._check_edits != "deferred":
+            return
+        report = self.invalid_edits()
+        if report:
+            position, mf, mt, exc = report[0]
+            raise SectionRenderError(
+                f"the edited MF={mf}/MT={mt} section of the material at "
+                f"position {position} does not render to valid ENDF-6 text "
+                f"({len(report)} edited section(s) failed to render); call "
+                "invalid_edits() for the full report"
+            ) from exc.__cause__
+
+    def _output_materials(self):
+        """Yield each material assembled and ready for :func:`write_tape`.
+
+        Each material is produced as a ``{MF: {MT: section}}`` dict, one
+        at a time, so a streaming consumer (:func:`write_tape_file`)
+        never holds the whole tape in memory. An untouched section is
+        assembled from its raw on-disk text -- it is not parsed -- so
+        only sections that were actually edited were ever parsed.
+        """
+        for slot in self._materials:
+            yield self._assemble(slot)
 
     def to_string(self):
         """Return the (possibly edited) tape as an ENDF-6 formatted string.
@@ -973,19 +983,26 @@ class EndfFile:
         Untouched sections appear verbatim from disk (so an unedited
         tape is reproduced byte for byte) and edited or added sections
         are rendered by the parser. The result ends with a newline; use
-        :meth:`str.splitlines` if a list of lines is needed. To write a
-        file instead, use :meth:`export`.
+        :meth:`str.splitlines` if a list of lines is needed.
+
+        This necessarily builds the whole tape in memory; for a large
+        tape, write it to a file with :meth:`export`, which is
+        memory-bounded.
         """
         self._ensure_valid()
-        return write_tape(self._assembled_materials(), parser=self._parser)
+        self._check_deferred_edits()
+        with self._read_session():
+            return write_tape(self._output_materials(), parser=self._parser)
 
     def export(self, path, *, overwrite=False):
         """Write the (possibly edited) tape to a file.
 
-        The tape is written via a temporary file and an atomic replace.
-        Untouched sections are written verbatim from disk; edited and
-        added sections are rendered by the parser. An existing file is
-        only overwritten when ``overwrite=True``.
+        The tape is written one material at a time via a temporary file
+        and an atomic replace, so peak memory stays bounded by a single
+        material regardless of the tape size. Untouched sections are
+        taken verbatim from disk (they are not parsed); edited and added
+        sections are rendered by the parser. An existing file is only
+        overwritten when ``overwrite=True``.
 
         Exporting onto the file the :class:`EndfFile` was opened from is
         permitted, but it leaves the in-memory structural index stale
@@ -996,7 +1013,7 @@ class EndfFile:
         leaves the object usable.
         """
         self._ensure_valid()
-        materials = self._assembled_materials()
+        self._check_deferred_edits()
         path = os.fspath(path)
         if os.path.exists(path) and not overwrite:
             raise FileExistsError(
@@ -1004,7 +1021,10 @@ class EndfFile:
             )
         onto_source = os.path.realpath(path) == os.path.realpath(self._path)
         tmp = path + ".endfparserpy-tmp"
-        write_tape_file(materials, tmp, parser=self._parser, overwrite=True)
+        with self._read_session():
+            write_tape_file(
+                self._output_materials(), tmp, parser=self._parser, overwrite=True
+            )
         os.replace(tmp, path)
         if onto_source:
             # the file the index describes has just been rewritten; the

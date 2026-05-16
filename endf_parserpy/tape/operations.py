@@ -207,23 +207,30 @@ def _strip_leading_tpid(lines):
 
 
 def _material_lines(material, parser, exclude, include):
+    # A material given as a list of ENDF-6 lines, or as a FailedMaterial,
+    # is written verbatim -- no parse, no render. A parsed material
+    # dictionary is rendered by the single-material parser.
     if isinstance(material, FailedMaterial):
         return list(material.raw_lines)
+    if isinstance(material, list):
+        return list(material)
     return parser.write(material, exclude=exclude, include=include)
 
 
-def _assemble_tape_lines(materials, parser, exclude, include):
-    """Assemble materials into the lines of a single multi-material tape.
+def _iter_tape_chunks(materials, parser, exclude, include):
+    """Yield a multi-material tape as text chunks, one material at a time.
 
-    Each material is written with an ordinary single-material parser;
-    the resulting per-material tape head (TPID) and tape end (TEND)
-    records are stripped so that the combined tape carries the TPID once
-    at the start, every material followed by its MEND record, and a
-    single TEND record at the end.
+    The first chunk is the tape head (TPID), then comes one chunk per
+    material (its records through the MEND record), and the last chunk
+    is the tape end (TEND); every chunk ends with a newline. Each
+    material is written with an ordinary single-material parser and its
+    own per-material TPID/TEND records are stripped.
+
+    ``materials`` is consumed lazily, so when it is a generator the
+    whole tape is never held in memory at once.
     """
     parser = _ensure_parser(parser)
-    body = []
-    tpid_line = None
+    tpid_emitted = False
     final_tend = None
     for material in materials:
         lines = _material_lines(material, parser, exclude, include)
@@ -231,16 +238,12 @@ def _assemble_tape_lines(materials, parser, exclude, include):
         if tend is not None:
             final_tend = tend
         lines, tpid = _strip_leading_tpid(lines)
-        if tpid is not None and tpid_line is None:
-            tpid_line = tpid
-        body.extend(lines)
-
-    result = []
-    if tpid_line is not None:
-        result.append(tpid_line)
-    result.extend(body)
-    result.append(final_tend if final_tend is not None else TEND_LINE)
-    return result
+        if tpid is not None and not tpid_emitted:
+            yield tpid + "\n"
+            tpid_emitted = True
+        if lines:
+            yield "\n".join(lines) + "\n"
+    yield (final_tend if final_tend is not None else TEND_LINE) + "\n"
 
 
 def write_tape(materials, *, parser=None, exclude=None, include=None):
@@ -251,10 +254,14 @@ def write_tape(materials, *, parser=None, exclude=None, include=None):
     Parameters
     ----------
     materials : Iterable
-        Parsed material dictionaries and/or :class:`FailedMaterial`
-        objects, in the desired tape order.
+        The materials, in the desired tape order. Each entry is either
+        a parsed material dictionary (rendered by the parser), a
+        ``list`` of raw ENDF-6 lines, or a :class:`FailedMaterial` -- the
+        latter two are written *verbatim*, with no intermediate parse or
+        render, so an already-formatted material is copied through
+        unchanged.
     parser : EndfParserBase, optional
-        Parser used to write each material. Defaults to
+        Parser used to write each material *dictionary*. Defaults to
         ``EndfParserFactory.create(select="fastest")``.
     exclude, include : optional
         Forwarded unchanged to the single-material parser's ``write``.
@@ -263,11 +270,11 @@ def write_tape(materials, *, parser=None, exclude=None, include=None):
     -------
     str
         The assembled tape as a single ENDF-6 formatted string, ending
-        with a newline. To write a file instead, use
+        with a newline. This necessarily holds the whole tape in
+        memory; to write a large tape with bounded memory, use
         :func:`write_tape_file`.
     """
-    lines = _assemble_tape_lines(materials, parser, exclude, include)
-    return "\n".join(lines) + "\n"
+    return "".join(_iter_tape_chunks(materials, parser, exclude, include))
 
 
 def write_tape_file(
@@ -279,12 +286,17 @@ def write_tape_file(
     (``str`` or :class:`os.PathLike`). An existing file is only
     overwritten when ``overwrite=True``. See :func:`write_tape` for the
     remaining parameters.
+
+    Each material is rendered and written before the next is pulled
+    from ``materials``, so when ``materials`` is a generator the peak
+    memory stays bounded by the size of a single material rather than
+    by the size of the whole tape.
     """
     path = os.fspath(path)
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(
             f"file {path} already exists; pass overwrite=True to replace it"
         )
-    lines = _assemble_tape_lines(materials, parser, exclude, include)
     with open(path, "w") as fh:
-        fh.write("\n".join(lines) + "\n")
+        for chunk in _iter_tape_chunks(materials, parser, exclude, include):
+            fh.write(chunk)
