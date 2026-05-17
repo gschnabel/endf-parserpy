@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2025/05/26
+# Last modified:   2026/05/17
 # License:         MIT
-# Copyright (c) 2024-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -13,9 +13,9 @@ import sys
 from ..cmd_utils import (
     add_common_cmd_parser_args,
     get_endf_parser,
-    determine_include,
+    open_endf_file,
+    resolve_material_path,
 )
-from endf_parserpy import EndfPath
 from endf_parserpy.utils.user_tools import show_content
 
 
@@ -39,8 +39,23 @@ def perform_action(args):
 
 
 def _show_file_content(parser, endfpath, file):
-    endfpath = EndfPath(endfpath)
-    include = determine_include(endfpath)
-    endf_dict = parser.parsefile(file, include=include)
-    cont = endfpath.get(endf_dict)
+    endf_file = open_endf_file(file, parser)
+    resolved = resolve_material_path(endf_file, endfpath)
+    try:
+        cont = endf_file[resolved]
+    except Exception as exc:  # noqa: BLE001
+        print(f"cannot access {resolved}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    # A material-depth path yields a MaterialView, which is not a plain
+    # mapping; list its sections instead of dumping fields.
+    if hasattr(cont, "sections"):
+        print(f"  #{cont.position}  MAT={cont.mat}  ZA={cont.za}  AWR={cont.awr}")
+        print("  sections (MF/MT):")
+        for mf, mt in cont.sections():
+            print(f"    {mf}/{mt}")
+        return
+    # A section/field path yields a read-only section view; detach it to
+    # a plain dict/list, which is what show_content() consumes.
+    if hasattr(cont, "detach"):
+        cont = cont.detach()
     show_content(cont)

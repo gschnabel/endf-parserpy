@@ -195,3 +195,43 @@ def test_match_multi_material_selective(two_material_tape):
     assert result.returncode == 0
     assert "material #1, MAT 3025" in result.stdout
     assert "material #0" not in result.stdout
+
+
+# --- Phase 7: the show subcommand ------------------------------------------
+
+
+def test_show_single_material_bare_path():
+    """A selector-less path still works on a single-material file."""
+    result = run_cli(["show", "3/2/AWR", str(CU)])
+    assert result.returncode == 0
+    assert "62.389" in result.stdout
+
+
+def test_show_multi_material_value(two_material_tape):
+    """A #-prefixed path shows a field of the selected material."""
+    result = run_cli(["show", "#1/3/2/AWR", str(two_material_tape)])
+    assert result.returncode == 0
+    assert "63.38" in result.stdout
+
+
+def test_show_multi_material_section(two_material_tape):
+    """A #-prefixed section path shows that material's section."""
+    result = run_cli(["show", "#1/3/2", str(two_material_tape)])
+    assert result.returncode == 0
+    assert "/ZA:" in result.stdout and "30064" in result.stdout
+
+
+def test_show_multi_material_material_depth(two_material_tape):
+    """A material-depth path lists the material's sections."""
+    result = run_cli(["show", "#0", str(two_material_tape)])
+    assert result.returncode == 0
+    assert "MAT=2925" in result.stdout
+    assert "sections (MF/MT):" in result.stdout
+    assert "1/451" in result.stdout
+
+
+def test_show_multi_material_bare_path_rejected(two_material_tape):
+    """On a multi-material tape a selector-less path is rejected."""
+    result = run_cli(["show", "3/2", str(two_material_tape)])
+    assert result.returncode == 1
+    assert "2 materials" in result.stderr
