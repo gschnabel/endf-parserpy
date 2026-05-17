@@ -181,6 +181,20 @@ inline py::object py_append_container(py::object pyobj, int key, bool list_mode,
 }
 
 
+// Format a value for inclusion in an error message. For floating-point
+// values this prints numeric_limits<double>::digits10 significant digits
+// instead of the stream default of 6, so that a small difference between
+// two otherwise similar values (e.g. AWR=11.89691 vs AWR=11.8969) stays
+// visible while remaining free of floating-point rounding noise.
+// std::setprecision has no effect on integer or string values.
+template<typename T>
+inline std::string format_mismatch_value(const T &value) {
+  std::stringstream ss;
+  ss << std::setprecision(std::numeric_limits<double>::digits10) << value;
+  return ss.str();
+}
+
+
 template<typename U, typename V, typename W>
 inline void throw_mismatch_error(
   U quantity, V expected_value, W actual_value,
@@ -188,8 +202,8 @@ inline void throw_mismatch_error(
 ) {
   std::stringstream errmsg;
   errmsg << "Invalid " << quantity << " encountered! "
-         << "Expected " << quantity << "=" << expected_value
-         << " but found " << quantity <<"=" << actual_value << std::endl;
+         << "Expected " << quantity << "=" << format_mismatch_value(expected_value)
+         << " but found " << quantity <<"=" << format_mismatch_value(actual_value) << std::endl;
   if (template_line.size() > 0) {
     errmsg << "Template: " << template_line << std::endl;
   }
@@ -206,8 +220,8 @@ inline void throw_number_mismatch_error(
   std::string line, std::string template_line
 ) {
   std::stringstream errmsg;
-  errmsg << "Expected a field to contain the value " << expected_value
-         << " but found instead the value " << actual_value << "." << std::endl;
+  errmsg << "Expected a field to contain the value " << format_mismatch_value(expected_value)
+         << " but found instead the value " << format_mismatch_value(actual_value) << "." << std::endl;
   if (template_line.size() > 0) {
     errmsg << "Template: " << template_line << std::endl;
   }

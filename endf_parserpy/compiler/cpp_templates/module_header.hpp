@@ -19,6 +19,7 @@
 #include <cmath>      // for std::isfinite
 #include <cerrno>     // for errno (ERANGE)
 #include <climits>    // for INT_MIN / INT_MAX
+#include <limits>     // for std::numeric_limits
 
 // When Python merges the various
 // C++ files, there is no need
