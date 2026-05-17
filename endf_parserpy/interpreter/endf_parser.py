@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2022/05/30
-# Last modified:   2026/05/13
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2022-2026 International Atomic Energy Agency (IAEA)
 #
@@ -89,7 +89,7 @@ from .endf_recipe_utils import (
 from endf_parserpy.endf_recipes import get_recipe_dict
 from endf_parserpy.utils.debugging_utils import TrackingDict
 from .helpers import array_dict_to_list
-from ..endf_parser_base import EndfParserBase
+from ..endf_parser_base import EndfParserBase, _record_init_kwargs
 
 
 class EndfParserPy(EndfParserBase):
@@ -104,6 +104,7 @@ class EndfParserPy(EndfParserBase):
     are :func:`parsefile` and :func:`writefile`.
     """
 
+    @_record_init_kwargs
     def __init__(
         self,
         ignore_number_mismatch=False,

@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/05/29
-# Last modified:   2026/05/13
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -12,7 +12,7 @@
 import importlib
 import os
 from endf_parserpy.utils.accessories import EndfDict
-from ..endf_parser_base import EndfParserBase
+from ..endf_parser_base import EndfParserBase, _record_init_kwargs
 
 
 class EndfParserCpp(EndfParserBase):
@@ -40,6 +40,7 @@ class EndfParserCpp(EndfParserBase):
     are implemented in this class.
     """
 
+    @_record_init_kwargs
     def __init__(
         self,
         ignore_number_mismatch=False,

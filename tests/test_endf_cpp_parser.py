@@ -1,5 +1,6 @@
 import pytest
 import os
+import pickle
 import tempfile
 from pathlib import Path
 from endf_parserpy.interpreter.endf_parser import EndfParserPy
@@ -239,3 +240,18 @@ def test_linenum_wraparound_verbatim():
     assert max(linenums) == linenum_max
     assert len([lnum for lnum in linenums if lnum == 1]) > 1
     assert all(n == (m % linenum_max) + 1 for m, n in enumerate(linenums))
+
+
+@pytest.mark.parametrize("parser_class", [EndfParserPy, EndfParserCpp])
+def test_parser_pickles_by_recipe(parser_class):
+    # a parser pickles by recipe -- its constructor arguments -- and is
+    # rebuilt on unpickling. The C++ parser was previously not picklable
+    # at all; both engines now round-trip as a small construction recipe
+    # with their non-default options preserved.
+    try:
+        parser = parser_class(keep_E=True)
+    except ImportError:
+        pytest.skip(f"{parser_class.__name__} unavailable")
+    restored = pickle.loads(pickle.dumps(parser))
+    assert type(restored) is parser_class
+    assert restored.write_opts["keep_E"] is True

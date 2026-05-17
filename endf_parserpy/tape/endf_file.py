@@ -34,8 +34,7 @@ from contextlib import contextmanager
 from collections.abc import Mapping
 
 from ..endf_parser_factory import EndfParserFactory
-from ..interpreter.endf_parser import EndfParserPy
-from ..cpp_parsers.endf_parser_cpp import EndfParserCpp
+from ..endf_parser_base import EndfParserBase
 from .address import (
     EndfMaterialPath,
     parse_index_spec,
@@ -73,26 +72,6 @@ _VALID_CHECK_EDITS = ("eager", "deferred")
 
 # sentinel distinguishing "no value given" from an explicit value of None
 _UNSET = object()
-
-
-def _backend_of(parser):
-    """Return the engine name (``"cpp"``/``"python"``) of a parser.
-
-    A pickled :class:`EndfFile` stores only this name and recreates the
-    parser from it on unpickling, since the parser object itself is not
-    picklable. The check is by :func:`isinstance`, so a subclass of
-    either engine is still recognised, and an unrecognised parser is
-    rejected outright rather than silently mapped to a default engine
-    that a pickle round-trip would then swap in.
-    """
-    if isinstance(parser, EndfParserCpp):
-        return "cpp"
-    if isinstance(parser, EndfParserPy):
-        return "python"
-    raise TypeError(
-        f"unsupported parser type {type(parser).__name__}; EndfFile needs an "
-        "EndfParserCpp or EndfParserPy, as created by EndfParserFactory.create()"
-    )
 
 
 def _value_match(field, value, tol):
@@ -238,7 +217,11 @@ class EndfFile:
             )
         self._path = os.fspath(filename)
         self._parser = parser or EndfParserFactory.create(select="fastest")
-        self._backend = _backend_of(self._parser)
+        if not isinstance(self._parser, EndfParserBase):
+            raise TypeError(
+                f"parser must be an EndfParserBase instance (as created by "
+                f"EndfParserFactory.create()), got {type(self._parser).__name__}"
+            )
         self._on_error = on_error
         self._check_edits = check_edits
         self._verify_source = verify_source
@@ -1271,16 +1254,16 @@ class EndfFile:
 
     # -- pickling ------------------------------------------------------
     #
-    # The index and the material slots (which carry any edits) are
-    # pickled; the caches and named secondary indexes are not, and
-    # the parser is recreated from its backend name. Custom parser
-    # options are therefore not preserved across pickling, and any
-    # secondary indexes must be rebuilt with build_index() afterwards.
+    # The index, the material slots (which carry any edits) and the
+    # parser are pickled; the caches and named secondary indexes are
+    # not. The parser pickles by recipe (see EndfParserBase), so its
+    # construction options are preserved across pickling. Any secondary
+    # indexes must be rebuilt with build_index() afterwards.
 
     def __getstate__(self):
         return {
             "path": self._path,
-            "backend": self._backend,
+            "parser": self._parser,
             "on_error": self._on_error,
             "check_edits": self._check_edits,
             "invalidated": self._invalidated,
@@ -1293,8 +1276,7 @@ class EndfFile:
 
     def __setstate__(self, state):
         self._path = state["path"]
-        self._backend = state["backend"]
-        self._parser = EndfParserFactory.create(select=state["backend"])
+        self._parser = state["parser"]
         self._on_error = state["on_error"]
         self._check_edits = state.get("check_edits", "eager")
         self._invalidated = state.get("invalidated", False)

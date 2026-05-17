@@ -301,19 +301,29 @@ def test_pickle_roundtrip(tape_file, parser):
 
 
 def test_pickle_preserves_parser_engine(tape_file, parser):
-    # the parser object itself is not picklable, so EndfFile records its
-    # engine and recreates a parser of the same engine on unpickling
+    # the parser is pickled with the EndfFile (by recipe -- see
+    # EndfParserBase), so the unpickled EndfFile keeps the same engine
     endf_file = EndfFile(tape_file, parser=parser)
     restored = pickle.loads(pickle.dumps(endf_file))
     assert type(restored.parser) is type(endf_file.parser)
 
 
+def test_pickle_preserves_parser_options(tape_file, parser):
+    # a parser built with non-default options keeps those options across
+    # an EndfFile pickle round-trip -- the parser is pickled by recipe,
+    # not recreated with factory defaults
+    select = "python" if "Py" in type(parser).__name__ else "cpp"
+    custom = EndfParserFactory.create(select=select, keep_E=True)
+    assert custom.write_opts["keep_E"] is True
+    endf_file = EndfFile(tape_file, parser=custom)
+    restored = pickle.loads(pickle.dumps(endf_file))
+    assert restored.parser.write_opts["keep_E"] is True
+
+
 def test_unrecognised_parser_is_rejected(tape_file):
-    # a parser that is neither EndfParserCpp nor EndfParserPy has no known
-    # engine name; it is rejected at construction rather than silently
-    # mapped to a default engine that a pickle round-trip would swap in
+    # a parser that is not an EndfParserBase is rejected at construction
     class NotAParser:
         pass
 
-    with pytest.raises(TypeError, match="unsupported parser type"):
+    with pytest.raises(TypeError, match="must be an EndfParserBase"):
         EndfFile(tape_file, parser=NotAParser())
