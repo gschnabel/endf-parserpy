@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 
 from endf_parserpy import EndfParserFactory, EndfFile
-from endf_parserpy.tape import SectionRenderError
+from endf_parserpy.tape import SectionRenderError, TapeStructureError
 from endf_parserpy.tape.splitter import TEND_LINE
 
 
@@ -304,6 +304,38 @@ def test_live_sequence_slice_is_a_detached_copy():
     # mutating the slice must not reach the canonical section
     piece[0]["x"] = 999
     assert target[0]["x"] == 1
+
+
+def test_export_rejects_a_sectionless_material(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU, ZN])
+    for key in list(endf_file[0].sections()):
+        del endf_file[0][key]
+    assert len(endf_file[0]) == 0
+    # a material with no sections is not valid ENDF -- it is rejected at
+    # output time, naming its position
+    with pytest.raises(TapeStructureError, match="position 0 has no sections"):
+        endf_file.export(tmp_path / "out.endf")
+    with pytest.raises(TapeStructureError, match="position 0 has no sections"):
+        endf_file.to_string()
+
+
+def test_append_empty_material_is_rejected_at_export(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    endf_file.append_material({}, mat=3025)
+    with pytest.raises(TapeStructureError, match="position 1 has no sections"):
+        endf_file.export(tmp_path / "out.endf")
+
+
+def test_emptied_material_can_be_rebuilt_and_exported(tmp_path, parser):
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    section = dict(endf_file[0][1, 451])
+    for key in list(endf_file[0].sections()):
+        del endf_file[0][key]
+    # the empty state is transient: re-adding a section makes it valid
+    endf_file[0][1, 451] = section
+    out = tmp_path / "out.endf"
+    endf_file.export(out)
+    assert len(EndfFile(out, parser=parser)) == 1
 
 
 def test_reorder(tmp_path, parser):

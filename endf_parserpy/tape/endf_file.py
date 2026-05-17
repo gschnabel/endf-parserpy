@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/16
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -45,6 +45,7 @@ from .errors import (
     SectionParseError,
     SectionRenderError,
     StaleSourceError,
+    TapeStructureError,
 )
 from .index import TapeIndex
 from .material import MaterialView, _MaterialSlot
@@ -1080,6 +1081,24 @@ class EndfFile:
                 "invalid_edits() for the full report"
             ) from exc.__cause__
 
+    def _check_materials_have_sections(self):
+        """Reject, before output, a material left with no sections.
+
+        A sectionless material is a legal *transient* state -- e.g.
+        while every section is deleted to rebuild a material -- but it
+        is not valid ENDF: on re-indexing such a material is silently
+        dropped. It is therefore rejected at :meth:`export` /
+        :meth:`to_string` time, naming the offending position.
+        """
+        for position, slot in enumerate(self._materials):
+            if not self._slot_section_keys_set(slot):
+                raise TapeStructureError(
+                    f"the material at position {position} has no sections; "
+                    "a material must have at least one section to be "
+                    "written -- use 'del endf_file[position]' to remove a "
+                    "material entirely"
+                )
+
     def _empty_tape_text(self):
         """The ENDF-6 text of this tape once every material is removed.
 
@@ -1117,6 +1136,7 @@ class EndfFile:
         """
         self._ensure_valid()
         self._check_deferred_edits()
+        self._check_materials_have_sections()
         if not self._materials:
             return self._empty_tape_text()
         with self._read_session():
@@ -1144,6 +1164,7 @@ class EndfFile:
         """
         self._ensure_valid()
         self._check_deferred_edits()
+        self._check_materials_have_sections()
         path = os.fspath(path)
         if os.path.exists(path) and not overwrite:
             raise FileExistsError(
