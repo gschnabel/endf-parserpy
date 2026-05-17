@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2026/05/13
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -11,6 +11,7 @@
 
 
 import os
+import sys
 import platform
 from copy import copy
 import argparse
@@ -18,6 +19,7 @@ from .. import (
     EndfParserPy,
     EndfParserCpp,
     EndfPath,
+    EndfFile,
 )
 
 
@@ -177,3 +179,46 @@ def create_backup_file(file):
             pass
     if not backup_created:
         raise OSError(f"Unable to create backup file for {file}")
+
+
+def open_endf_file(file, parser, **kwargs):
+    """Open ``file`` as an :class:`EndfFile`, the uniform CLI access object.
+
+    A single-material file is simply an :class:`EndfFile` of length one,
+    so the same object transparently handles single- and multi-material
+    files, and individual sections are parsed only when accessed.
+    """
+    return EndfFile(file, parser=parser, **kwargs)
+
+
+def format_material_table(endf_file):
+    """Return a human-readable listing of the materials in ``endf_file``."""
+    lines = []
+    for mv in endf_file:
+        lines.append(f"  #{mv.position}  MAT={mv.mat}  ZA={mv.za}  AWR={mv.awr}")
+    return "\n".join(lines)
+
+
+def resolve_material_path(endf_file, raw_path):
+    """Resolve a CLI path argument to a material-qualified path string.
+
+    A path containing ``#`` is treated as an
+    :class:`~endf_parserpy.EndfMaterialPath` and used as given. A path
+    without ``#`` is a plain :class:`~endf_parserpy.EndfPath`; it is
+    accepted only when ``endf_file`` holds a single material (it is then
+    addressed against that material via the ``#0`` selector). On a
+    multi-material file a selector-less path is rejected with a listing
+    of the available materials.
+    """
+    raw_path = str(raw_path).strip()
+    if "#" in raw_path:
+        return raw_path
+    if len(endf_file) == 1:
+        return f"#0/{raw_path}" if raw_path else "#0"
+    msg = (
+        f"the file holds {len(endf_file)} materials; prefix the path with "
+        "a material selector (#k for tape position k, or MAT#k for the "
+        "k-th material with that MAT number):\n" + format_material_table(endf_file)
+    )
+    print(msg, file=sys.stderr)
+    sys.exit(1)
