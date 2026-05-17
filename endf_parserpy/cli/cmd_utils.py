@@ -209,6 +209,21 @@ def open_endf_file(file, parser, **kwargs):
     return EndfFile(file, parser=parser, **kwargs)
 
 
+def parsed_material_dict(material):
+    """Return a fully parsed ``{MF: {MT: section}}`` dict for ``material``.
+
+    Every section of the :class:`MaterialView` is accessed (and hence
+    parsed) and detached to a plain ``dict``, yielding the same data
+    structure the single-file parser used to return from ``parsefile``.
+    The tape-level MF=0/MT=0 head is not a material section and is left
+    out, so the result describes the material's own data only.
+    """
+    endf_dict = {}
+    for mf, mt in material.sections():
+        endf_dict.setdefault(mf, {})[mt] = material[mf, mt].detach()
+    return endf_dict
+
+
 def format_material_table(endf_file):
     """Return a human-readable listing of the materials in ``endf_file``."""
     lines = []

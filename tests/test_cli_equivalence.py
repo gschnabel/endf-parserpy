@@ -43,8 +43,12 @@ CASES = [
     {"id": "show_value", "argv": ["show", "3/2/AWR", "{cu}"]},
     {"id": "validate_one", "argv": ["validate", "{cu}"]},
     {"id": "validate_many", "argv": ["validate", "{cu}", "{zn}"]},
+    # compare on two identical single-material files: the field-by-field
+    # diff path of two materials with *different* MAT numbers is no longer
+    # an equivalence case -- multi-material `compare` pairs by MAT number,
+    # so cross-MAT comparison intentionally changed; it is covered by
+    # tests/test_cli_multimaterial.py instead.
     {"id": "compare_equal", "argv": ["compare", "{cu}", "{cu2}"]},
-    {"id": "compare_diff", "argv": ["compare", "{cu}", "{zn}"]},
     {"id": "explain_var", "argv": ["explain", "3/2/AWR", "{cu}"]},
     {"id": "match_query", "argv": ["match", "{cu}", "--query", "exists(/3/2)"]},
     {

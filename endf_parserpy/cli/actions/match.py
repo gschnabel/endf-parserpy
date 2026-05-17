@@ -17,6 +17,7 @@ from ..cmd_utils import (
     add_common_cmd_parser_args,
     get_endf_parser,
     open_endf_file,
+    parsed_material_dict,
 )
 from glob import glob
 import sys
@@ -44,19 +45,6 @@ def perform_action(args):
     sys.exit(retcode)
 
 
-def _material_dict(material):
-    """Return a fully parsed ``{MF: {MT: section}}`` dict for ``material``.
-
-    Every section is accessed (and hence parsed) and detached to a plain
-    ``dict`` so the query expressions see the same data structure the
-    single-file parser used to hand to :func:`eval_tree_print`.
-    """
-    endf_dict = {}
-    for mf, mt in material.sections():
-        endf_dict.setdefault(mf, {})[mt] = material[mf, mt].detach()
-    return endf_dict
-
-
 def _match_endf_files(parser, files, tree):
     any_failed = False
     for file in files:
@@ -72,7 +60,7 @@ def _match_endf_files(parser, files, tree):
             if multi:
                 label = f"{file} (material #{material.position}, MAT {material.mat})"
             try:
-                endf_dict = _material_dict(material)
+                endf_dict = parsed_material_dict(material)
             except Exception:  # noqa: BLE001
                 any_failed = True
                 print(f"parsing failed: {label}")

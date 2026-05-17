@@ -333,3 +333,55 @@ def test_insert_text_multi_material_without_selector_rejected(
     assert result.returncode == 1
     assert "2 materials" in result.stderr
     assert "-m/--material" in result.stderr
+
+
+# --- Phase 11: the compare subcommand --------------------------------------
+
+
+@pytest.fixture(scope="module")
+def modified_cu(tmp_path_factory, parser):
+    """A copy of the Cu-63 file (same MAT 2925) with its AWR field bumped."""
+    cu = parse_tape_file(CU, parser=parser)[0]
+    cu[1][451]["AWR"] = cu[1][451]["AWR"] + 1.0
+    path = tmp_path_factory.mktemp("modcu") / "cu_mod.endf"
+    write_tape_file([cu], path, parser=parser, overwrite=True)
+    return path
+
+
+def test_compare_same_mat_equal():
+    """Two identical single-material files compare equal."""
+    result = run_cli(["compare", str(CU), str(CU)])
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_compare_same_mat_diff(modified_cu):
+    """Same-MAT files that differ produce a field diff and exit code 1."""
+    result = run_cli(["compare", str(CU), str(modified_cu)])
+    assert result.returncode == 1
+    assert "AWR" in result.stdout
+
+
+def test_compare_cross_mat_unpaired():
+    """Single-material files with different MAT numbers are reported unpaired."""
+    result = run_cli(["compare", str(CU), str(ZN)])
+    assert result.returncode == 1
+    assert "unpaired" in result.stdout
+    assert "MAT 2925" in result.stdout and "MAT 3025" in result.stdout
+
+
+def test_compare_multi_material_paired(two_material_tape):
+    """A multi-material tape compared with itself pairs every material."""
+    result = run_cli(["compare", str(two_material_tape), str(two_material_tape)])
+    assert result.returncode == 0
+    assert "MAT 2925" in result.stdout and "MAT 3025" in result.stdout
+    assert "unpaired" not in result.stdout
+
+
+def test_compare_multi_vs_single_partial(two_material_tape):
+    """Comparing a 2-material tape with a 1-material file pairs the common
+    MAT and reports the rest as unpaired."""
+    result = run_cli(["compare", str(two_material_tape), str(CU)])
+    assert result.returncode == 1
+    assert "unpaired" in result.stdout
+    assert "MAT 3025" in result.stdout
