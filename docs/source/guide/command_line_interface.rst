@@ -30,12 +30,14 @@ which yields
 
 .. code-block:: text
 
-   usage: endf-cli [-h] {compare,validate,replace,show,update-directory,insert-text,explain,match} ...
+   usage: endf-cli [-h]
+                   {compare,convert,validate,replace,show,list,update-directory,insert-text,explain,match}
+                   ...
 
    Command-line interface to ENDF files
 
    positional arguments:
-     {compare,validate,replace,show,update-directory,insert-text,explain,match}
+     {compare,convert,validate,replace,show,list,update-directory,insert-text,explain,match}
 
      options:
        -h, --help            show this help message and exit
@@ -58,6 +60,42 @@ Brief explanations of the various functionalities of the
 command line interface are given in the following sections.
 
 
+.. _cli_multimaterial:
+
+Working with multi-material files
+---------------------------------
+
+An ENDF file (a *tape*) may contain more than one material. Every
+``endf-cli`` subcommand handles such :ref:`multi-material files
+<multimaterial_files_sec>` transparently. To list the materials on a
+tape, run
+
+.. code-block:: bash
+
+   endf-cli list <endf-file>
+
+which prints one line per material, with its tape position, MAT number,
+ZA and AWR.
+
+Subcommands that take an :ref:`EndfPath <endf_path_class>` (``show``,
+``explain``, ``replace``) accept a *material-qualified* path on a
+multi-material tape. Such a path is an ordinary EndfPath prefixed with a
+**material selector** and a ``/``:
+
+* ``#k`` selects the material at tape position ``k`` (zero-based), e.g.
+  ``#0/3/2/AWR``;
+* ``MAT`` selects the material with that MAT number, e.g. ``2925/3/2``;
+* ``MAT#k`` selects the ``k``-th material carrying that MAT number, e.g.
+  ``9237#1/3/2`` (useful for PENDF tapes that repeat a MAT number once
+  per temperature).
+
+The presence of a ``#`` is what marks a path as material-qualified. On a
+file that holds a single material the selector may be omitted, so the
+plain paths described in the following sections keep working unchanged.
+On a multi-material tape a selector-less path is rejected with a listing
+of the available materials, so you can pick one.
+
+
 Comparing
 ---------
 
@@ -74,6 +112,13 @@ absolute and relative numerical tolerances, respectively, for the comparison of
 .. code-block:: bash
 
    endf-cli compare --atol 1e-10 --rtol 1e-6 file1.endf file2.endf
+
+When the files are :ref:`multi-material tapes <cli_multimaterial>`, their
+materials are paired by MAT number before being compared (a repeated MAT
+number is paired by order of appearance, so the ``k``-th occurrence in
+one file is matched with the ``k``-th in the other). Each pair is then
+compared field by field, and any material that has no counterpart in the
+other file is reported as unpaired.
 
 
 Validating
@@ -161,6 +206,24 @@ of float numbers is preserved <guide_perfect_precision>`.
 By default, a backup of the original file will be created with endfing ``.bak``.
 If you want to skip the creation of a backup file, supply the ``-n`` argument.
 
+The path may also address coarser units than a single section. An
+``MF`` path replaces a whole MF file (every MT section it contains), and
+a material-only path replaces an entire material:
+
+.. code-block:: bash
+
+   endf-cli replace /3 source.endf target.endf      # whole MF3 file
+   endf-cli replace '#0' source.endf target.endf    # whole material #0
+
+In both cases the addressed unit of the target is made equal to the
+source's: target sections the source does not have are removed.
+
+When the source or target is a :ref:`multi-material tape
+<cli_multimaterial>`, prefix the EndfPath with a material selector, e.g.
+``endf-cli replace '#0/1/451' source.endf target.endf``. The same path
+(and hence the same selector) is applied to the source and to every
+target file.
+
 .. note::
 
    Be aware that the directory in MF1/MT451 is not updated during
@@ -188,19 +251,24 @@ execute
 
    endf-cli show /3/1/xstable/E file.endf
 
-Or if you just want to know the available MF sections in a file, run
+Or if you just want to know the sections (MF/MT pairs) available in a
+file, run
 
 .. code-block:: bash
 
    endf-cli show / file.endf
 
 Based on the output, you can then interactively explore the file content.
-For example, if you see that MF3 is available, you can show all the available
-MT numbers within:
+For example, if you see that MF3 is available, you can list the MT
+numbers within:
 
 .. code-block:: bash
 
    endf-cli show /3/ file.endf
+
+On a :ref:`multi-material tape <cli_multimaterial>`, prefix the path with
+a material selector, e.g. ``endf-cli show '#0/3/1' file.endf``; a bare
+``#0`` lists every section of that material.
 
 
 .. _updating_directory_cli:
@@ -243,6 +311,11 @@ after the line indicated via the ``-l`` argument.
 Supply the ``-n`` switch if you want to suppress the
 creation of a backup file.
 
+On a :ref:`multi-material tape <cli_multimaterial>` the material whose
+description is to be modified must be selected with the ``-m`` argument,
+e.g. ``-m '#0'``, ``-m 2925`` or ``-m '9237#1'``. On a single-material
+file the ``-m`` argument may be omitted.
+
 
 Converting between ENDF and JSON
 --------------------------------
@@ -261,6 +334,12 @@ For the opposite direction to convert a JSON file to ENDF, use the command
 
    endf-cli convert --to endf <source-json-file> <target-endf-file>
 
+
+A single-material file is converted to a JSON *object*, whereas a
+:ref:`multi-material tape <cli_multimaterial>` is converted to a JSON
+*array* with one object per material. The opposite direction recognises
+the two cases by the type of the top-level JSON value, so a tape
+round-trips through JSON without any extra arguments.
 
 These commands will fail if the target file already exists.
 You may want to consider the additional argument ``--array_type=list``,

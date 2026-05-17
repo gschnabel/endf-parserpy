@@ -94,15 +94,68 @@ def perform_action(args):
     sys.exit(retcode)
 
 
-def _replace_element(parser, raw_path, sourcefile, destfiles, create_backup):
-    source = open_endf_file(sourcefile, parser)
-    obj = source[resolve_material_path(source, raw_path)]
-    # detach a section view to a standalone dict so it survives once the
-    # source EndfFile goes out of scope (a field path yields a scalar)
+def _selector_of(resolved_path):
+    """Return the material-selector segment of a resolved path."""
+    return resolved_path.strip("/").split("/")[0]
+
+
+def _extract(endf_file, resolved, label):
+    """Return the object addressed by ``resolved`` in ``endf_file``.
+
+    A material- or MF-depth path yields a ``{(MF, MT): section}`` mapping
+    of every section it covers; a section- or field-depth path yields the
+    detached section dict or the plain field value. The returned
+    ``mf_scope`` is the MF number for an MF-depth path, ``None`` for a
+    material-depth path, and otherwise unused.
+    """
+    mp = EndfMaterialPath(resolved)
+    if mp.mf is None:
+        # whole material
+        material = endf_file[_selector_of(resolved)]
+        sections = {mfmt: material[mfmt].detach() for mfmt in material.sections()}
+        return "material", None, sections
+    if mp.mt is None:
+        # whole MF file
+        material = endf_file[_selector_of(resolved)]
+        sections = {
+            (mf, mt): material[mf, mt].detach()
+            for (mf, mt) in material.sections()
+            if mf == mp.mf
+        }
+        if not sections:
+            print(f"{label} has no MF={mp.mf} section to copy", file=sys.stderr)
+            sys.exit(1)
+        return "mf", mp.mf, sections
+    # a section or a field within a section
+    obj = endf_file[resolved]
     if hasattr(obj, "detach"):
         obj = obj.detach()
+    return "path", None, obj
+
+
+def _install(endf_file, resolved, kind, mf_scope, obj):
+    """Write ``obj`` (as produced by :func:`_extract`) into ``endf_file``."""
+    if kind == "path":
+        endf_file[resolved] = obj
+        return
+    # kind is "material" or "mf": replace whole sections so that the
+    # destination's covered sections become exactly the source's
+    material = endf_file[_selector_of(resolved)]
+    for mfmt, section in obj.items():
+        material[mfmt] = section
+    for mf, mt in list(material.sections()):
+        in_scope = mf_scope is None or mf == mf_scope
+        if in_scope and (mf, mt) not in obj:
+            del material[mf, mt]
+
+
+def _replace_element(parser, raw_path, sourcefile, destfiles, create_backup):
+    source = open_endf_file(sourcefile, parser)
+    src_resolved = resolve_material_path(source, raw_path)
+    kind, mf_scope, obj = _extract(source, src_resolved, f"source {sourcefile}")
     for outfile in destfiles:
         dest = open_endf_file(outfile, parser)
-        dest[resolve_material_path(dest, raw_path)] = obj
+        dst_resolved = resolve_material_path(dest, raw_path)
+        _install(dest, dst_resolved, kind, mf_scope, obj)
         export_endf_file(dest, outfile, create_backup)
     return 0

@@ -237,6 +237,22 @@ def test_show_multi_material_bare_path_rejected(two_material_tape):
     assert "2 materials" in result.stderr
 
 
+def test_show_mf_depth_lists_mt_sections(two_material_tape):
+    """An MF-depth path lists the MT numbers present in that MF file."""
+    result = run_cli(["show", "#1/3", str(two_material_tape)])
+    assert result.returncode == 0
+    assert "MF=3 sections (MT):" in result.stdout
+    assert " 1," in result.stdout and " 2" in result.stdout
+
+
+def test_show_leading_and_trailing_slashes_accepted():
+    """Surrounding slashes in a path are optional (e.g. '/3/2/')."""
+    bare = run_cli(["show", "3/2/AWR", str(CU)])
+    slashed = run_cli(["show", "/3/2/AWR/", str(CU)])
+    assert slashed.returncode == 0
+    assert slashed.stdout == bare.stdout
+
+
 # --- Phase 8: the update-directory subcommand ------------------------------
 
 
@@ -431,3 +447,38 @@ def test_replace_multi_material_bare_path_rejected(two_material_tape, tmp_path):
     result = run_cli(["replace", "-n", "3/2/AWR", str(CU), str(work)])
     assert result.returncode == 1
     assert "2 materials" in result.stderr
+
+
+def test_replace_whole_mf(donor_tape, two_material_tape, parser, tmp_path):
+    """An MF-depth path replaces an entire MF file of the selected material."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["replace", "-n", "#1/3", str(donor_tape), str(work)])
+    assert result.returncode == 0
+    materials = parse_tape_file(work, parser=parser)
+    # MF3 of material #1 came from the donor ...
+    assert materials[1][3][2]["AWR"] == 999.0
+    # ... while material #0 and the MF1 of material #1 are untouched
+    assert materials[0][3][2]["AWR"] == 62.389
+    assert materials[1][1][451]["MAT"] == 3025
+
+
+def test_replace_whole_material(donor_tape, two_material_tape, parser, tmp_path):
+    """A material-depth path replaces an entire material."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["replace", "-n", "#1", str(donor_tape), str(work)])
+    assert result.returncode == 0
+    materials = parse_tape_file(work, parser=parser)
+    assert materials[1][3][2]["AWR"] == 999.0
+    assert materials[0][3][2]["AWR"] == 62.389
+
+
+def test_replace_whole_mf_missing_in_source(two_material_tape, parser, tmp_path):
+    """Replacing an MF file absent from the source fails with a clear error."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    # MF99 does not exist in the source
+    result = run_cli(["replace", "-n", "#0/99", str(CU), str(work)])
+    assert result.returncode == 1
+    assert "MF=99" in result.stderr

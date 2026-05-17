@@ -231,7 +231,9 @@ def resolve_material_path(endf_file, raw_path):
     multi-material file a selector-less path is rejected with a listing
     of the available materials.
     """
-    raw_path = str(raw_path).strip()
+    # surrounding slashes are optional in CLI paths (e.g. "/3/2" and
+    # "3/2" are the same); strip them so the path composes cleanly
+    raw_path = str(raw_path).strip().strip("/")
     if "#" in raw_path:
         return raw_path
     if len(endf_file) == 1:
