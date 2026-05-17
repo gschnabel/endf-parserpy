@@ -12,7 +12,7 @@ from endf_parserpy import (
     FailedMaterial,
 )
 from endf_parserpy.tape import split_materials, TapeStructureError
-from endf_parserpy.tape.splitter import TEND_LINE, _control_numbers
+from endf_parserpy.tape.records import TEND_LINE, _control_numbers
 
 
 TESTDATA = Path(__file__).parent / "testdata"
@@ -274,7 +274,7 @@ def test_write_tape_verbatim_materials(parser):
 
 
 def test_write_tape_empty_produces_valid_empty_tape(parser):
-    from endf_parserpy.tape.splitter import DEFAULT_TPID_LINE
+    from endf_parserpy.tape.records import DEFAULT_TPID_LINE
 
     tape = write_tape([], parser=parser)
     # an empty material list yields a valid tape: a default TPID + TEND

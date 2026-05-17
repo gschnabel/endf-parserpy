@@ -30,7 +30,6 @@ guarantee the ordinary writer gives.
 """
 
 import os
-import threading
 from contextlib import contextmanager
 from collections.abc import Mapping
 
@@ -53,7 +52,7 @@ from .errors import (
 from .index import TapeIndex
 from .material import MaterialView, _MaterialSlot
 from .operations import write_tape, write_tape_file, _VALID_ON_ERROR, _FailedUnit
-from .splitter import _control_numbers, TEND_LINE
+from .records import _control_numbers, _control_line, _strip_send, TEND_LINE
 from .views import (
     _FrozenMapping,
     _FrozenSequence,
@@ -75,34 +74,10 @@ _BACKEND_OF = {"EndfParserCpp": "cpp", "EndfParserPy": "python"}
 _UNSET = object()
 
 
-def _control_line(mat, mf, mt):
-    """Build a control-only ENDF record (used for FEND/MEND/TEND)."""
-    return " " * 66 + f"{mat:>4}{mf:>2}{mt:>3}"
-
-
 def _value_match(field, value, tol):
     if tol and isinstance(field, (int, float)) and isinstance(value, (int, float)):
         return abs(field - value) <= tol
     return field == value
-
-
-def _strip_send(lines):
-    """Drop a trailing SEND record from a section's raw lines.
-
-    The structural index spans a section through its SEND record, but
-    the writer re-emits the SEND itself, so a raw section handed to the
-    writer must not already carry one.
-
-    A SEND record is identified precisely, by MF>0 and MT=0; the
-    FEND/MEND/TEND records (which also have MT=0) are deliberately not
-    stripped, so a caller-supplied raw section is trimmed only when it
-    genuinely ends with its own SEND.
-    """
-    if lines:
-        _, mf, mt = _control_numbers(lines[-1])
-        if mf > 0 and mt == 0:
-            return lines[:-1]
-    return list(lines)
 
 
 class _CurrentMaterials:
@@ -212,10 +187,8 @@ class EndfFile:
     Notes
     -----
     An :class:`EndfFile` is not safe for concurrent use from several
-    threads. An internal lock keeps the section caches consistent and
-    serializes individual edits, but the material list and the
-    path-resolution, query and write-back operations are not guarded,
-    so a structural edit racing with any other access is undefined.
+    threads: its caches, material list and edit overlays are plain,
+    unguarded state, so any access racing with another is undefined.
     Use one :class:`EndfFile` per thread.
     """
 
@@ -256,7 +229,6 @@ class EndfFile:
         self._section_cache = _SectionCache(parsed_cache_bytes)
         self._material_views = {}
         self._secondary_indexes = {}
-        self._lock = threading.RLock()
         self._read_fh = None
         self._invalidated = False
         if mode == "load_raw":
@@ -320,11 +292,10 @@ class EndfFile:
         (its :attr:`~MaterialView.position` then raises). The named
         secondary indexes are dropped too -- see :meth:`_invalidate_indexes`.
         """
-        with self._lock:
-            slot = self._materials.pop(position)
-            slot.removed = True
-            self._material_views.pop(slot, None)
-            self._invalidate_indexes()
+        slot = self._materials.pop(position)
+        slot.removed = True
+        self._material_views.pop(slot, None)
+        self._invalidate_indexes()
 
     def _invalidate_indexes(self):
         """Drop the cached secondary indexes after a structural edit.
@@ -542,9 +513,8 @@ class EndfFile:
                 if self._check_edits == "eager":
                     self._check_section(*mf_mt, section)
                 slot.overlay[mf_mt] = section
-        with self._lock:
-            self._materials.append(slot)
-            self._invalidate_indexes()
+        self._materials.append(slot)
+        self._invalidate_indexes()
         return self[len(self._materials) - 1]
 
     def reorder(self, order):
@@ -557,9 +527,8 @@ class EndfFile:
         order = list(order)
         if sorted(order) != list(range(len(self._materials))):
             raise ValueError("order must be a permutation of range(len(self))")
-        with self._lock:
-            self._materials = [self._materials[i] for i in order]
-            self._invalidate_indexes()
+        self._materials = [self._materials[i] for i in order]
+        self._invalidate_indexes()
 
     # -- secondary lookups ---------------------------------------------
 
@@ -816,9 +785,8 @@ class EndfFile:
             )
         if self._check_edits == "eager":
             self._check_section(mf, mt, value)
-        with self._lock:
-            slot.overlay[(mf, mt)] = value
-            slot.deleted.discard((mf, mt))
+        slot.overlay[(mf, mt)] = value
+        slot.deleted.discard((mf, mt))
 
     def _set_slot_field(self, slot, mf, mt, subpath, value):
         """Read-modify-write a single field within a section.
@@ -837,26 +805,23 @@ class EndfFile:
             work = _plain(section)
             self._set_at(work, subpath, value)
             self._check_section(mf, mt, work)
-            with self._lock:
-                slot.overlay[(mf, mt)] = work
-                slot.deleted.discard((mf, mt))
+            slot.overlay[(mf, mt)] = work
+            slot.deleted.discard((mf, mt))
         else:
-            with self._lock:
-                self._set_at(section, subpath, value)
-                slot.overlay[(mf, mt)] = section
-                slot.deleted.discard((mf, mt))
+            self._set_at(section, subpath, value)
+            slot.overlay[(mf, mt)] = section
+            slot.deleted.discard((mf, mt))
 
     def _delete_slot_section(self, slot, mf, mt):
         self._ensure_valid()
-        with self._lock:
-            if (mf, mt) not in self._slot_section_keys_set(slot):
-                raise KeyError(f"this material has no MF={mf}/MT={mt} section")
-            slot.overlay.pop((mf, mt), None)
-            if (
-                slot.original_position is not None
-                and (mf, mt) in self._index[slot.original_position].sections
-            ):
-                slot.deleted.add((mf, mt))
+        if (mf, mt) not in self._slot_section_keys_set(slot):
+            raise KeyError(f"this material has no MF={mf}/MT={mt} section")
+        slot.overlay.pop((mf, mt), None)
+        if (
+            slot.original_position is not None
+            and (mf, mt) in self._index[slot.original_position].sections
+        ):
+            slot.deleted.add((mf, mt))
 
     def _delete_slot_field(self, slot, mf, mt, subpath):
         """Delete a single field within a section (deferred mode only)."""
@@ -869,10 +834,9 @@ class EndfFile:
             )
         section = self._get_slot_section(slot, mf, mt)
         self._require_mapping_section(section, mf, mt)
-        with self._lock:
-            self._del_at(section, subpath)
-            slot.overlay[(mf, mt)] = section
-            slot.deleted.discard((mf, mt))
+        self._del_at(section, subpath)
+        slot.overlay[(mf, mt)] = section
+        slot.deleted.discard((mf, mt))
 
     def _require_mapping_section(self, section, mf, mt):
         """Raise unless ``section`` is a parsed (mapping) section."""
@@ -914,9 +878,8 @@ class EndfFile:
         if self._check_edits == "deferred":
 
             def touch(_slot=slot, _mf=mf, _mt=mt, _section=section):
-                with self._lock:
-                    _slot.overlay[(_mf, _mt)] = _section
-                    _slot.deleted.discard((_mf, _mt))
+                _slot.overlay[(_mf, _mt)] = _section
+                _slot.deleted.discard((_mf, _mt))
 
             if isinstance(section, Mapping):
                 view = _LiveMapping(section, touch)
@@ -979,31 +942,29 @@ class EndfFile:
 
     def _get_raw(self, position, mf, mt, sec_entry):
         key = (position, mf, mt)
-        with self._lock:
-            cached = self._raw_cache.get(key)
-            if cached is not None:
-                return cached
-            raw = self._read_span(sec_entry.offset, sec_entry.length)
-            self._raw_cache.put(key, raw, sec_entry.length)
-            return raw
+        cached = self._raw_cache.get(key)
+        if cached is not None:
+            return cached
+        raw = self._read_span(sec_entry.offset, sec_entry.length)
+        self._raw_cache.put(key, raw, sec_entry.length)
+        return raw
 
     def _get_section(self, position, mf, mt):
         key = (position, mf, mt)
-        with self._lock:
-            cached = self._section_cache.get(key)
-            if cached is not None:
-                return cached
-            entry = self._index[position]
-            sec_entry = entry.sections.get((mf, mt))
-            if sec_entry is None:
-                raise KeyError(
-                    f"material at position {position} (MAT={entry.mat}) has "
-                    f"no MF={mf}/MT={mt} section"
-                )
-            raw = self._get_raw(position, mf, mt, sec_entry)
-            section = self._parse_section(entry, mf, mt, raw)
-            self._section_cache.put(key, section, sec_entry.length)
-            return section
+        cached = self._section_cache.get(key)
+        if cached is not None:
+            return cached
+        entry = self._index[position]
+        sec_entry = entry.sections.get((mf, mt))
+        if sec_entry is None:
+            raise KeyError(
+                f"material at position {position} (MAT={entry.mat}) has "
+                f"no MF={mf}/MT={mt} section"
+            )
+        raw = self._get_raw(position, mf, mt, sec_entry)
+        section = self._parse_section(entry, mf, mt, raw)
+        self._section_cache.put(key, section, sec_entry.length)
+        return section
 
     def _parse_section(self, entry, mf, mt, raw_lines):
         # wrap the section in a minimal single-material tape so the
@@ -1250,15 +1211,14 @@ class EndfFile:
         argument the whole cache is cleared; given a material position,
         only that material's cached data is dropped.
         """
-        with self._lock:
-            if position is None:
-                self._raw_cache.clear()
-                self._section_cache.clear()
-                return
-            original = self._materials[position].original_position
-            if original is not None:
-                self._raw_cache.drop_material(original)
-                self._section_cache.drop_material(original)
+        if position is None:
+            self._raw_cache.clear()
+            self._section_cache.clear()
+            return
+        original = self._materials[position].original_position
+        if original is not None:
+            self._raw_cache.drop_material(original)
+            self._section_cache.drop_material(original)
 
     @property
     def cache_nbytes(self):
@@ -1291,7 +1251,7 @@ class EndfFile:
     # -- pickling ------------------------------------------------------
     #
     # The index and the material slots (which carry any edits) are
-    # pickled; the lock, caches and named secondary indexes are not, and
+    # pickled; the caches and named secondary indexes are not, and
     # the parser is recreated from its backend name. Custom parser
     # options are therefore not preserved across pickling, and any
     # secondary indexes must be rebuilt with build_index() afterwards.
@@ -1324,5 +1284,4 @@ class EndfFile:
         self._section_cache = _SectionCache(state["parsed_cache_bytes"])
         self._material_views = {}
         self._secondary_indexes = {}
-        self._lock = threading.RLock()
         self._read_fh = None

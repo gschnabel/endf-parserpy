@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/16
-# Last modified:   2026/05/16
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -72,24 +72,35 @@ def _plain(obj):
     return obj
 
 
+def _raw_key(element):
+    """Return the bare key carried by a single-element :class:`EndfPath`.
+
+    An :class:`EndfPath` element is either an integer index or a string
+    key; ``int()`` recovers it when numeric and ``str()`` otherwise.
+    This is how a path element is turned back into a plain ``dict`` /
+    ``list`` key without reaching into :class:`EndfPath` internals.
+    """
+    try:
+        return int(element)
+    except (ValueError, TypeError):
+        return str(element)
+
+
 def _navigate(target, key):
     """Resolve ``key`` to a ``(parent_container, last_key)`` pair.
 
     An ``int`` key is a single element addressing ``target`` directly. A
     ``str`` or :class:`EndfPath` key is interpreted as an ``EndfPath``
-    relative to ``target`` (decision P4); the path is walked container by
-    container so that the navigation is agnostic to whether the
+    relative to ``target`` (decision P4); its leading part is walked by
+    the public :meth:`EndfPath.get`, which is agnostic to whether the
     intermediate containers are mappings or lists.
     """
     if isinstance(key, int):
         return target, key
-    elements = EndfPath(key)._path_elements
-    if not elements:
+    path = EndfPath(key)
+    if len(path) == 0:
         raise KeyError("an empty path does not address anything")
-    cur = target
-    for el in elements[:-1]:
-        cur = cur[el]
-    return cur, elements[-1]
+    return path[:-1].get(target), _raw_key(path[-1])
 
 
 class _SectionView:

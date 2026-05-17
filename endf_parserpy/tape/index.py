@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/16
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 from .errors import TapeStructureError
-from .splitter import _control_int, _MAT_COLS, _MF_COLS, _MT_COLS, _CTRL_COLS
+from .records import _control_int, _MAT_COLS, _MF_COLS, _MT_COLS, _CTRL_COLS
 
 try:
     import numpy as _np
@@ -169,131 +169,15 @@ def _iter_line_records(lines):
         yield len(encoded) + 1, encoded
 
 
-def _scan(records):
-    """Scan an iterator of ``(byte_length, line)`` records.
+class _ScanState:
+    """Carried state of a structural tape scan.
 
-    Return ``(materials, (tpid_line, offset, length))``. The iterator is
-    consumed lazily, so a streaming source (see :func:`_iter_file_records`)
-    keeps peak memory independent of the tape size.
-
-    Only the structural fields are read. The MAT/MF/MT control fields
-    occupy the fixed byte slice ``[66:75]`` of every record; since all
-    records of a section share that slice, a record whose slice is
-    unchanged from its predecessor is known to continue the current
-    section and is accumulated without parsing any integer. This fast
-    path covers the great majority of records.
-    """
-    materials = []
-    cur = None  # material under construction
-    sec_key = None  # (MF, MT) of the section under construction
-    sec_offset = sec_length = sec_lines = 0
-    prev_ctrl = None  # the [66:75] control slice of the previous record
-    offset = 0
-    tpid = None
-
-    def flush_section():
-        # store a section that was left open (e.g. a missing SEND record)
-        nonlocal sec_key
-        if sec_key is not None and cur is not None:
-            cur["sections"][sec_key] = SectionIndexEntry(
-                sec_offset, sec_length, sec_lines
-            )
-        sec_key = None
-
-    records = iter(records)
-
-    # the tape head (TPID) is the first non-blank record
-    for byte_length, part in records:
-        if part.strip():
-            mat = _control_int(part[_MAT_COLS])
-            mf = _control_int(part[_MF_COLS])
-            mt = _control_int(part[_MT_COLS])
-            if mat < 0 or mf != 0 or mt != 0:
-                raise TapeStructureError(
-                    "the tape does not begin with a tape head (TPID) "
-                    f"record (found MAT={mat}, MF={mf}, MT={mt})"
-                )
-            tpid = (part.rstrip(b"\r").decode("latin-1"), offset, byte_length)
-            offset += byte_length
-            break
-        offset += byte_length
-    if tpid is None:
-        raise TapeStructureError("the tape does not contain any records")
-
-    for byte_length, part in records:
-        ctrl = part[_CTRL_COLS]
-
-        # fast path: the control fields are unchanged, so this record
-        # continues the section currently under construction
-        if ctrl == prev_ctrl:
-            sec_length += byte_length
-            sec_lines += 1
-            offset += byte_length
-            continue
-
-        if not part.strip():  # blank padding record
-            offset += byte_length
-            continue
-
-        mat = _control_int(ctrl[0:4])
-        mf = _control_int(ctrl[4:6])
-        mt = _control_int(ctrl[6:9])
-
-        if mat == -1:  # TEND: end of tape
-            break
-        if mat > 0 and mf > 0 and mt > 0:  # regular record
-            if cur is None:
-                cur = {
-                    "position": len(materials),
-                    "mat": mat,
-                    "byte_offset": offset,
-                    "sections": {},
-                }
-                cur["za"], cur["awr"] = _read_za_awr(part.decode("latin-1"))
-            if (mf, mt) != sec_key:
-                flush_section()
-                sec_key = (mf, mt)
-                sec_offset = offset
-                sec_length = 0
-                sec_lines = 0
-            sec_length += byte_length
-            sec_lines += 1
-            prev_ctrl = ctrl
-        elif mf != 0 and mt == 0:  # SEND: end of section
-            if sec_key is not None and cur is not None:
-                cur["sections"][sec_key] = SectionIndexEntry(
-                    sec_offset, sec_length + byte_length, sec_lines + 1
-                )
-            sec_key = None
-            prev_ctrl = None
-        elif mat == 0 and mf == 0 and mt == 0:  # MEND: end of material
-            flush_section()
-            if cur is not None:
-                cur["byte_length"] = offset + byte_length - cur["byte_offset"]
-                materials.append(MaterialIndexEntry(**cur))
-                cur = None
-            prev_ctrl = None
-        else:  # FEND (mat > 0, mf == 0, mt == 0), or any other record
-            # a section cannot continue across such a record
-            flush_section()
-            prev_ctrl = None
-
-        offset += byte_length
-
-    if cur is not None:
-        raise TapeStructureError(
-            "the tape ends in the middle of a material; the final MEND or "
-            "TEND record is missing"
-        )
-    return materials, tpid
-
-
-class _ChunkScanState:
-    """Carried state of the chunked vectorized scan.
-
-    The chunked scan processes the tape one block of records at a time;
-    this object holds the structural state machine's progress so it can
-    continue seamlessly across block boundaries.
+    Holds the progress of the MAT/MF/MT state machine -- the material
+    under construction, the section under construction and the list of
+    finished materials. The same state is driven record by record by
+    the streaming :func:`_scan` and run by run, across block
+    boundaries, by the vectorized :func:`_scan_chunk_runs`; both feed it
+    through the shared :func:`_consume_run`.
     """
 
     __slots__ = (
@@ -326,6 +210,131 @@ class _ChunkScanState:
         self.sec_key = None
 
 
+def _consume_run(st, mat, mf, mt, offset, length, line_count, head_line):
+    """Apply one record, or one run of identical-control records, to ``st``.
+
+    This is the single classification of a record by its MAT/MF/MT
+    control field, shared by the streaming :func:`_scan` and the
+    vectorized :func:`_scan_chunk_runs` so the structural state machine
+    lives in exactly one place.
+
+    ``offset``, ``length`` and ``line_count`` describe the record or run
+    being consumed; ``head_line`` is the decoded text of its first
+    record, read for the ZA/AWR identifiers only when the run opens a
+    new material. The state ``st`` is updated in place and ``st.done``
+    is set once the tape end (TEND) record is reached.
+    """
+    if mat == -1:  # TEND: end of tape
+        st.done = True
+        return
+    if mat > 0 and mf > 0 and mt > 0:  # regular section record(s)
+        if st.cur is None:
+            st.cur = {
+                "position": len(st.materials),
+                "mat": mat,
+                "byte_offset": offset,
+                "sections": {},
+            }
+            st.cur["za"], st.cur["awr"] = _read_za_awr(head_line)
+        if (mf, mt) != st.sec_key:
+            st.flush_section()
+            st.sec_key = (mf, mt)
+            st.sec_offset = offset
+            st.sec_length = 0
+            st.sec_lines = 0
+        st.sec_length += length
+        st.sec_lines += line_count
+    elif mf != 0 and mt == 0:  # SEND: end of section
+        if st.sec_key is not None and st.cur is not None:
+            st.cur["sections"][st.sec_key] = SectionIndexEntry(
+                st.sec_offset, st.sec_length + length, st.sec_lines + line_count
+            )
+        st.sec_key = None
+    elif mat == 0 and mf == 0 and mt == 0:  # MEND: end of material
+        st.flush_section()
+        if st.cur is not None:
+            st.cur["byte_length"] = offset + length - st.cur["byte_offset"]
+            st.materials.append(MaterialIndexEntry(**st.cur))
+            st.cur = None
+    else:  # FEND (mat > 0, mf == 0, mt == 0), or any other record
+        # a section cannot continue across such a record
+        st.flush_section()
+
+
+def _scan(records):
+    """Scan an iterator of ``(byte_length, line)`` records.
+
+    Return ``(materials, (tpid_line, offset, length))``. The iterator is
+    consumed lazily, so a streaming source (see :func:`_iter_file_records`)
+    keeps peak memory independent of the tape size.
+
+    Only the structural fields are read. The MAT/MF/MT control fields
+    occupy the fixed byte slice ``[66:75]`` of every record; since all
+    records of a section share that slice, a record whose slice is
+    unchanged from its predecessor is known to continue the current
+    section and is accumulated without parsing any integer. This fast
+    path covers the great majority of records; a record that starts a
+    new run is classified by the shared :func:`_consume_run`.
+    """
+    st = _ScanState()
+    prev_ctrl = None  # the [66:75] control slice of the previous record
+    offset = 0
+    tpid = None
+
+    records = iter(records)
+
+    # the tape head (TPID) is the first non-blank record
+    for byte_length, part in records:
+        if part.strip():
+            mat = _control_int(part[_MAT_COLS])
+            mf = _control_int(part[_MF_COLS])
+            mt = _control_int(part[_MT_COLS])
+            if mat < 0 or mf != 0 or mt != 0:
+                raise TapeStructureError(
+                    "the tape does not begin with a tape head (TPID) "
+                    f"record (found MAT={mat}, MF={mf}, MT={mt})"
+                )
+            tpid = (part.rstrip(b"\r").decode("latin-1"), offset, byte_length)
+            offset += byte_length
+            break
+        offset += byte_length
+    if tpid is None:
+        raise TapeStructureError("the tape does not contain any records")
+
+    for byte_length, part in records:
+        ctrl = part[_CTRL_COLS]
+
+        # fast path: the control fields are unchanged, so this record
+        # continues the section currently under construction
+        if ctrl == prev_ctrl:
+            st.sec_length += byte_length
+            st.sec_lines += 1
+            offset += byte_length
+            continue
+
+        if not part.strip():  # blank padding record
+            offset += byte_length
+            continue
+
+        mat = _control_int(ctrl[0:4])
+        mf = _control_int(ctrl[4:6])
+        mt = _control_int(ctrl[6:9])
+        _consume_run(st, mat, mf, mt, offset, byte_length, 1, part.decode("latin-1"))
+        if st.done:  # TEND: nothing meaningful follows
+            break
+        # only a run of regular section records can be extended by the
+        # fast path; after any framing record the next record restarts
+        prev_ctrl = ctrl if (mat > 0 and mf > 0 and mt > 0) else None
+        offset += byte_length
+
+    if st.cur is not None:
+        raise TapeStructureError(
+            "the tape ends in the middle of a material; the final MEND or "
+            "TEND record is missing"
+        )
+    return st.materials, tpid
+
+
 def _scan_chunk_runs(buf, num_records, start_row, base, line_width, st):
     """Run the structural state machine over one block of whole records.
 
@@ -340,7 +349,8 @@ def _scan_chunk_runs(buf, num_records, start_row, base, line_width, st):
     The MAT/MF/MT control field of every record is the byte slice
     ``[66:75]``; a section or material boundary is exactly a row whose
     control field differs from its predecessor, so the per-record scan
-    collapses into a loop over *runs* of identical control fields.
+    collapses into a loop over *runs* of identical control fields. Each
+    run is then classified by the shared :func:`_consume_run`.
     """
     if num_records <= start_row:
         return
@@ -373,46 +383,12 @@ def _scan_chunk_runs(buf, num_records, start_row, base, line_width, st):
         mat = _control_int(ctrl_field[0:4])
         mf = _control_int(ctrl_field[4:6])
         mt = _control_int(ctrl_field[6:9])
-        if mat == -1:  # TEND: end of tape
-            st.done = True
+        head_line = buf[start * line_width : start * line_width + line_width].decode(
+            "latin-1"
+        )
+        _consume_run(st, mat, mf, mt, run_offset, run_length, end - start, head_line)
+        if st.done:  # TEND: end of tape
             return
-        if mat > 0 and mf > 0 and mt > 0:  # a run of regular section records
-            if st.cur is None:
-                st.cur = {
-                    "position": len(st.materials),
-                    "mat": mat,
-                    "byte_offset": run_offset,
-                    "sections": {},
-                }
-                st.cur["za"], st.cur["awr"] = _read_za_awr(
-                    buf[start * line_width : start * line_width + line_width].decode(
-                        "latin-1"
-                    )
-                )
-            if (mf, mt) != st.sec_key:
-                st.flush_section()
-                st.sec_key = (mf, mt)
-                st.sec_offset = run_offset
-                st.sec_length = 0
-                st.sec_lines = 0
-            st.sec_length += run_length
-            st.sec_lines += end - start
-        elif mf != 0 and mt == 0:  # SEND: end of section
-            if st.sec_key is not None and st.cur is not None:
-                st.cur["sections"][st.sec_key] = SectionIndexEntry(
-                    st.sec_offset,
-                    st.sec_length + run_length,
-                    st.sec_lines + (end - start),
-                )
-            st.sec_key = None
-        elif mat == 0 and mf == 0 and mt == 0:  # MEND: end of material
-            st.flush_section()
-            if st.cur is not None:
-                st.cur["byte_length"] = run_offset + run_length - st.cur["byte_offset"]
-                st.materials.append(MaterialIndexEntry(**st.cur))
-                st.cur = None
-        else:  # FEND, or any other record a section cannot span
-            st.flush_section()
 
 
 def _vec_scan_file(fh, chunk_bytes):
@@ -473,7 +449,7 @@ def _vec_scan_file(fh, chunk_bytes):
         line_width,
     )
 
-    st = _ChunkScanState()
+    st = _ScanState()
     # scan the records of the first block that follow the TPID
     _scan_chunk_runs(first, num0, tpid_row + 1, 0, line_width, st)
     if not st.uniform:

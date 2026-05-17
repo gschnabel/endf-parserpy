@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/16
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -23,55 +23,7 @@ the content of the records is never interpreted.
 """
 
 from .errors import TapeStructureError
-
-
-# A tape end (TEND) record: MAT=-1, MF=0, MT=0, all value fields blank.
-# This synthetic record is only ever used as input to a single-material
-# parser, so no trailing sequence number is required.
-TEND_LINE = " " * 66 + "  -1 0  0"
-
-# A default tape head (TPID) record: a blank 66-column label followed by
-# MAT=1, MF=0, MT=0. Emitted when a tape is assembled from materials
-# that carry no TPID of their own, so that an assembled tape -- an empty
-# one included -- always begins with a valid TPID record.
-DEFAULT_TPID_LINE = " " * 66 + "   1 0  0"
-
-# The MAT/MF/MT control fields occupy fixed columns of every ENDF
-# record: MAT in columns 67-70, MF in 71-72 and MT in 73-75. These
-# zero-based byte slices are the single definition of that layout,
-# used here and by the structural scanner in index.py.
-_MAT_COLS = slice(66, 70)
-_MF_COLS = slice(70, 72)
-_MT_COLS = slice(72, 75)
-_CTRL_COLS = slice(66, 75)
-
-
-def _control_int(field):
-    """Parse an integer from a MAT/MF/MT control field.
-
-    A blank or non-numeric field reads as zero, consistent with the
-    ENDF convention for blank control fields. Accepts ``str`` or
-    ``bytes`` -- ``int()`` handles both and strips surrounding spaces.
-    """
-    try:
-        return int(field)
-    except ValueError:
-        return 0
-
-
-def _control_numbers(line):
-    """Return the ``(MAT, MF, MT)`` integers of an ENDF line.
-
-    The control fields occupy columns 67-70 (MAT), 71-72 (MF) and
-    73-75 (MT). Blank or non-numeric control fields are interpreted as
-    zero, consistent with how blank control fields are treated
-    throughout ENDF-6.
-    """
-    return (
-        _control_int(line[_MAT_COLS]),
-        _control_int(line[_MF_COLS]),
-        _control_int(line[_MT_COLS]),
-    )
+from .records import _control_numbers, TEND_LINE
 
 
 def split_materials(lines):

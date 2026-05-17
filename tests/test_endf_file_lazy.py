@@ -13,7 +13,7 @@ from endf_parserpy.tape import (
     StaleSourceError,
     TapeStructureError,
 )
-from endf_parserpy.tape.splitter import _control_numbers, TEND_LINE, DEFAULT_TPID_LINE
+from endf_parserpy.tape.records import _control_numbers, TEND_LINE, DEFAULT_TPID_LINE
 
 
 TESTDATA = Path(__file__).parent / "testdata"

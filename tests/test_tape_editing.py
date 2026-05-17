@@ -4,7 +4,7 @@ from pathlib import Path
 
 from endf_parserpy import EndfParserFactory, EndfFile
 from endf_parserpy.tape import SectionRenderError, TapeStructureError
-from endf_parserpy.tape.splitter import TEND_LINE
+from endf_parserpy.tape.records import TEND_LINE
 
 
 TESTDATA = Path(__file__).parent / "testdata"
@@ -93,7 +93,7 @@ def test_export_empty_tape(tmp_path, parser):
 def test_strip_send_only_strips_a_real_send():
     # regression: only a genuine SEND (MF>0, MT=0) is stripped; an
     # FEND/MEND/TEND record (also MT=0) must be left in place
-    from endf_parserpy.tape.endf_file import _strip_send
+    from endf_parserpy.tape.records import _strip_send
 
     data = " " * 66 + "2925 3  2"  # a data record of MF=3/MT=2
     send = " " * 66 + "2925 3  0"  # SEND  (MF=3,  MT=0)

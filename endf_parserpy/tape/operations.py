@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/16
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -26,7 +26,14 @@ in-memory ENDF-6 string, the ``_file`` variant on a file path.
 import os
 
 from ..endf_parser_factory import EndfParserFactory
-from .splitter import split_materials, _control_numbers, TEND_LINE, DEFAULT_TPID_LINE
+from .splitter import split_materials
+from .records import (
+    _control_numbers,
+    TEND_LINE,
+    DEFAULT_TPID_LINE,
+    _strip_leading_tpid,
+    _strip_trailing_tend,
+)
 
 
 _VALID_ON_ERROR = ("raise", "mark")
@@ -217,24 +224,6 @@ def parse_tape_file(path, *, parser=None, exclude=None, include=None, on_error="
 # --------------------------------------------------------------------------
 
 
-def _strip_trailing_tend(lines):
-    """Drop a trailing TEND record; return ``(lines, tend_or_None)``."""
-    if lines:
-        mat, _, _ = _control_numbers(lines[-1])
-        if mat == -1:
-            return lines[:-1], lines[-1]
-    return lines, None
-
-
-def _strip_leading_tpid(lines):
-    """Drop a leading TPID record; return ``(lines, tpid_or_None)``."""
-    if lines:
-        _, mf, mt = _control_numbers(lines[0])
-        if mf == 0 and mt == 0:
-            return lines[1:], lines[0]
-    return lines, None
-
-
 def _material_lines(material, parser, exclude, include):
     # A material given as a list of ENDF-6 lines, or as a FailedMaterial,
     # is written verbatim -- no parse, no render. A parsed material
@@ -250,7 +239,7 @@ def _iter_tape_chunks(materials, parser, exclude, include):
     """Yield a multi-material tape as text chunks, one material at a time.
 
     The first chunk is the tape head (TPID) -- the first material's own,
-    or :data:`~endf_parserpy.tape.splitter.DEFAULT_TPID_LINE` when no
+    or :data:`~endf_parserpy.tape.records.DEFAULT_TPID_LINE` when no
     material carries one (so an empty material list still yields a valid
     TPID + TEND tape). Then comes one chunk per material (its records
     through the MEND record), and the last chunk is the tape end (TEND);

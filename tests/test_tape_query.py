@@ -3,7 +3,7 @@ from pathlib import Path
 
 from endf_parserpy import EndfParserFactory, EndfFile, EndfMaterialPath, TapeIndex
 from endf_parserpy.tape import AmbiguousMaterialError, SectionParseError
-from endf_parserpy.tape.splitter import _control_numbers
+from endf_parserpy.tape.records import _control_numbers
 
 
 TESTDATA = Path(__file__).parent / "testdata"
