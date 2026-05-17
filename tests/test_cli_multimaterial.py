@@ -176,3 +176,22 @@ def test_explain_multi_material_bare_path_rejected(two_material_tape):
     assert result.returncode == 1
     assert "2 materials" in result.stderr
     assert "#0" in result.stderr and "#1" in result.stderr
+
+
+# --- Phase 6: the match subcommand -----------------------------------------
+
+
+def test_match_multi_material_all(two_material_tape):
+    """A query satisfied by every material reports every material."""
+    result = run_cli(["match", str(two_material_tape), "--query", "exists(/3/2)"])
+    assert result.returncode == 0
+    assert "material #0, MAT 2925" in result.stdout
+    assert "material #1, MAT 3025" in result.stdout
+
+
+def test_match_multi_material_selective(two_material_tape):
+    """A query satisfied by only one material reports only that one."""
+    result = run_cli(["match", str(two_material_tape), "--query", "/1/451/ZA == 30064"])
+    assert result.returncode == 0
+    assert "material #1, MAT 3025" in result.stdout
+    assert "material #0" not in result.stdout

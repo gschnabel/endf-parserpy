@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2024/10/16
+# Last modified:   2026/05/17
 # License:         MIT
-# Copyright (c) 2024 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -16,6 +16,7 @@ from endf_parserpy.utils.matching import (
 from ..cmd_utils import (
     add_common_cmd_parser_args,
     get_endf_parser,
+    open_endf_file,
 )
 from glob import glob
 import sys
@@ -43,23 +44,41 @@ def perform_action(args):
     sys.exit(retcode)
 
 
+def _material_dict(material):
+    """Return a fully parsed ``{MF: {MT: section}}`` dict for ``material``.
+
+    Every section is accessed (and hence parsed) and detached to a plain
+    ``dict`` so the query expressions see the same data structure the
+    single-file parser used to hand to :func:`eval_tree_print`.
+    """
+    endf_dict = {}
+    for mf, mt in material.sections():
+        endf_dict.setdefault(mf, {})[mt] = material[mf, mt].detach()
+    return endf_dict
+
+
 def _match_endf_files(parser, files, tree):
     any_failed = False
-    file_status_list = []
     for file in files:
-        file_failed = False
         try:
-            endf_dict = parser.parsefile(file)
-        except Exception as exc:
-            file_failed = True
+            endf_file = open_endf_file(file, parser, on_error="raise")
+        except Exception:  # noqa: BLE001
             any_failed = True
             print(f"parsing failed: {file}")
-
-        if file_failed:
             continue
-
-        opts = {"filename": file, "print": "match"}
-        retval = eval_tree_print(tree, endf_dict, opts)
+        multi = len(endf_file) > 1
+        for material in endf_file:
+            label = file
+            if multi:
+                label = f"{file} (material #{material.position}, MAT {material.mat})"
+            try:
+                endf_dict = _material_dict(material)
+            except Exception:  # noqa: BLE001
+                any_failed = True
+                print(f"parsing failed: {label}")
+                continue
+            opts = {"filename": label, "print": "match"}
+            eval_tree_print(tree, endf_dict, opts)
 
     retcode = 1 if any_failed else 0
     return retcode
