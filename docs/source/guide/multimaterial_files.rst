@@ -159,6 +159,19 @@ as a list of raw strings instead:
 
    section = endf_file[0][3, 2]       # parsed MF=3/MT=2 section, a dict
 
+A whole material can also be lifted out of the tape as an
+ordinary single-material tape dictionary with the
+:meth:`~endf_parserpy.tape.MaterialView.to_tape_dict` method.
+The result is a ``{MF: {MT: section}}`` mapping -- the same
+form a single-material parse produces, complete with its
+``MF=0``/``MT=0`` tape head -- so it can be handed straight to
+the parser's writer or to :func:`~endf_parserpy.write_tape`:
+
+.. code:: Python
+
+   material_dict = endf_file[0].to_tape_dict()   # one material as a tape dict
+   text = parser.write(material_dict)            # render it on its own
+
 Because the same material number (``MAT``) may occur several
 times on a tape — a PENDF tape repeats it for every
 temperature — materials are identified by position rather
@@ -220,9 +233,12 @@ their positions to :meth:`~endf_parserpy.EndfFile.reorder`:
 Finally, :meth:`~endf_parserpy.EndfFile.export` writes the
 edited tape to a file and :meth:`~endf_parserpy.EndfFile.to_string`
 returns it as an ENDF-6 string -- the same memory/file pairing
-as the module functions. Sections that were not edited are
-written back verbatim, so an unedited tape is reproduced byte
-for byte:
+as the module functions. Sections that were not edited keep
+their data records verbatim from disk; the SEND/FEND/MEND
+framing and the column 76-80 sequence numbers are regenerated
+either way. Every data field is therefore preserved byte for
+byte, but the tape as a whole is not necessarily byte-identical
+to the original:
 
 .. code:: Python
 
@@ -392,3 +408,47 @@ A view — frozen or live — is itself path-addressable: a string
 key is read as an :class:`~endf_parserpy.EndfPath` relative to
 the view, so ``relaxed['#0/3/2']['xstable/E']`` and
 ``relaxed['#0/3/2/xstable/E']`` reach the same data.
+
+Bounded memory and parallel processing
+--------------------------------------
+
+Because :class:`~endf_parserpy.EndfFile` parses sections lazily,
+it can open a tape far larger than the available memory. Parsed
+and raw sections are kept in two caches of a fixed byte budget,
+set by the ``parsed_cache_bytes`` and ``raw_cache_bytes``
+constructor arguments; once a budget is exhausted the
+least-recently-used entries are evicted and re-read on the next
+access:
+
+.. code:: Python
+
+   # 16 MiB for each cache tier instead of the 64 MiB default
+   endf_file = EndfFile('huge.endf', parsed_cache_bytes=16 << 20,
+                        raw_cache_bytes=16 << 20)
+
+The :attr:`~endf_parserpy.EndfFile.cache_nbytes` property reports
+the current ``(raw, parsed)`` cache occupancy, and the
+:meth:`~endf_parserpy.EndfFile.unload` method drops the cached
+sections of one material — or, with no argument, of the whole
+tape — without discarding any pending edits.
+
+The parser objects are picklable, so a configured parser can be
+shipped to a pool of worker processes. Together with the fast,
+index-only construction of :class:`~endf_parserpy.EndfFile`, this
+makes it straightforward to scan or parse a whole library of
+files in parallel:
+
+.. code:: Python
+
+   from concurrent.futures import ProcessPoolExecutor
+   from functools import partial
+   from endf_parserpy import EndfParserFactory, EndfFile
+
+   parser = EndfParserFactory.create(select='fastest')
+
+   def material_count(path, parser):
+       return path, len(EndfFile(path, parser=parser))
+
+   with ProcessPoolExecutor() as pool:
+       worker = partial(material_count, parser=parser)  # parser is pickled
+       counts = dict(pool.map(worker, library_files))

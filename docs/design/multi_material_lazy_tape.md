@@ -285,12 +285,17 @@ deferred: streaming the write (`save` assembles all materials before writing).
 ## 6. Round-trip contract
 
 * A raw-kept MT section (parsed with `exclude`, or no recipe available, or never
-  accessed in lazy mode) → **byte-identical content lines**, copied verbatim.
+  accessed in lazy mode) → its **data records are copied verbatim**, so every
+  data field is preserved byte-for-byte.
 * A parsed/dirty MT section → canonical re-render via the recipe + `write_opts`.
+* The SEND/FEND/MEND framing records and the column 76-80 sequence numbers are
+  regenerated for every section either way, so the framing is conformant but
+  not necessarily a byte-copy of the input.
 * Line endings normalised to LF; inter-material blank lines dropped.
-* Therefore: a tape parsed with `exclude=(everything)` and written back is
-  byte-identical modulo line endings. This is the verbatim-copy mode and is the
-  basis of the strongest round-trip test.
+* Therefore: a tape parsed with `exclude=(everything)` and written back
+  reproduces every data field byte-for-byte, but is **not** byte-identical
+  overall — the framing and sequence numbers are re-emitted. This data-exact
+  round trip is the basis of the strongest round-trip test.
 
 ---
 
@@ -314,8 +319,9 @@ deferred: streaming the write (`save` assembles all materials before writing).
 * Unit tests per phase (listed above).
 * Fixtures: small hand-built 2- and 3-material tapes; a real multi-temperature
   PENDF tape; a tape with a deliberately malformed material (for `on_error`).
-* **Round-trip suite:** parse-with-full-exclude → `write_tape` → assert
-  byte-identical (modulo LF) on a multi-material fixture.
+* **Round-trip suite:** parse-with-full-exclude → `write_tape` → assert every
+  data field is preserved byte-for-byte (framing and sequence numbers are
+  regenerated) on a multi-material fixture.
 * **Cross-check:** `parse_tape` of an N-material tape vs. N separate
   single-material `parsefile` calls on the split chunks — must be identical.
 * **Memory test:** `iter_parse_tape` over a large tape with an assertion on peak

@@ -26,8 +26,11 @@ of the major nuclear data libraries, such as
 and [JENDL](https://wwwndc.jaea.go.jp/jendl/jendl.html).
 ENDF-6 files containing several materials (multi-material *tapes*,
 including PENDF/GENDF files that repeat the same material at different
-temperatures) are supported via the `parse_tape`, `iter_parse_tape`
-and `write_tape` functions.
+temperatures) are supported as well: the `parse_tape`, `iter_parse_tape`
+and `write_tape` functions read and write them as lists of material
+dictionaries, while the `EndfFile` class offers lazy, memory-bounded
+access, indexing the file on construction and parsing individual
+sections only on demand.
 
 
 ## Install endf-parserpy
