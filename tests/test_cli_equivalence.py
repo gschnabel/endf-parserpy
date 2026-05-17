@@ -11,6 +11,10 @@ pre-multi-material CLI and must not be regenerated casually.  To
 deliberately recapture them, run::
 
     ENDF_CLI_CAPTURE=1 pytest tests/test_cli_equivalence.py
+
+Output-file hashes are taken modulo a single end-of-file newline (see
+``_run_case``), so a tape written by ``EndfFile.export`` compares equal
+to one written by the pre-change ``parser.writefile``.
 """
 
 import hashlib
@@ -95,6 +99,11 @@ def _run_case(case, workdir):
     result = {"stdout": proc.stdout, "returncode": proc.returncode, "files": {}}
     for outfile in case.get("outfiles", []):
         data = (workdir / _subst(outfile)).read_bytes()
+        # Normalize the end-of-file newline before hashing: EndfFile.export
+        # terminates the tape with a newline whereas the pre-change CLI's
+        # parser.writefile did not. That single trailing byte is the only
+        # intended difference, so it must not register as a regression.
+        data = data.rstrip(b"\n") + b"\n"
         result["files"][outfile] = hashlib.sha256(data).hexdigest()
     return result
 

@@ -235,3 +235,20 @@ def test_show_multi_material_bare_path_rejected(two_material_tape):
     result = run_cli(["show", "3/2", str(two_material_tape)])
     assert result.returncode == 1
     assert "2 materials" in result.stderr
+
+
+# --- Phase 8: the update-directory subcommand ------------------------------
+
+
+def test_update_directory_multi_material(two_material_tape, parser, tmp_path):
+    """update-directory rewrites the MF1/MT451 directory of every material."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["update-directory", "-n", str(work)])
+    assert result.returncode == 0
+    endf_file = open_endf_file(work, parser)
+    assert len(endf_file) == 2
+    for material in endf_file:
+        mt451 = material[1, 451]
+        listed = set(zip(mt451["MFx"].values(), mt451["MTx"].values()))
+        assert listed == set(material.sections())
