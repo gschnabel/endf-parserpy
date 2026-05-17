@@ -192,8 +192,8 @@ one can be done by
 
 
 Noteworthy, this command also works if ``target.endf``
-is an empty file. To include a tape id (the first line of
-an ENDF file) specify ``/0/0`` as EndfPath. Replacing content
+is an empty file: a new ENDF file holding the copied content
+is then created. Replacing content
 can also be done on a more fine-grained level. As an advanced
 example, a specific spingroup in MF2/MT151, can be replaced by
 

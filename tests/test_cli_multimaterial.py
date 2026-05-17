@@ -482,3 +482,24 @@ def test_replace_whole_mf_missing_in_source(two_material_tape, parser, tmp_path)
     result = run_cli(["replace", "-n", "#0/99", str(CU), str(work)])
     assert result.returncode == 1
     assert "MF=99" in result.stderr
+
+
+def test_replace_into_empty_file_builds_new_tape(parser, tmp_path):
+    """An empty target file is turned into a new ENDF file holding the copy."""
+    work = tmp_path / "new.endf"
+    work.write_text("")
+    result = run_cli(["replace", "-n", "/3/2", str(CU), str(work)])
+    assert result.returncode == 0
+    material = parse_tape_file(work, parser=parser)[0]
+    assert 3 in material and 2 in material[3]
+    assert material[3][2]["AWR"] == 62.389
+
+
+def test_replace_whole_material_into_empty_file(parser, tmp_path):
+    """A whole-material replace into an empty file recreates the material."""
+    work = tmp_path / "new.endf"
+    work.write_text("")
+    result = run_cli(["replace", "-n", "/", str(CU), str(work)])
+    assert result.returncode == 0
+    material = parse_tape_file(work, parser=parser)[0]
+    assert material[1][451]["MAT"] == 2925

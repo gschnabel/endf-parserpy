@@ -15,6 +15,7 @@ from ..cmd_utils import (
     get_endf_parser,
     open_endf_file,
     resolve_material_path,
+    selector_of,
 )
 from endf_parserpy import EndfMaterialPath
 from endf_parserpy.utils.user_tools import show_content
@@ -46,8 +47,7 @@ def _show_file_content(parser, endfpath, file):
     if mp.mf is not None and mp.mt is None:
         # an MF-depth path does not address data; list the MT sections
         # present in that MF (EndfFile itself rejects MF-level access)
-        selector = resolved.strip("/").split("/")[0]
-        material = endf_file[selector]
+        material = endf_file[selector_of(resolved)]
         mts = sorted(mt for mf, mt in material.sections() if mf == mp.mf)
         if mts:
             joined = ", ".join(str(mt) for mt in mts)

@@ -240,8 +240,19 @@ def resolve_material_path(endf_file, raw_path):
         return f"#0/{raw_path}" if raw_path else "#0"
     msg = (
         f"the file holds {len(endf_file)} materials; prefix the path with "
-        "a material selector (#k for tape position k, or MAT#k for the "
-        "k-th material with that MAT number):\n" + format_material_table(endf_file)
+        "a material selector (#k for tape position k, MAT for the material "
+        "with that MAT number, or MAT#k for its k-th occurrence):\n"
+        + format_material_table(endf_file)
     )
     print(msg, file=sys.stderr)
     sys.exit(1)
+
+
+def selector_of(material_path):
+    """Return the material-selector segment of a material-qualified path.
+
+    ``material_path`` is a path string as produced by
+    :func:`resolve_material_path`; the part before the first ``/`` is the
+    material selector (``#k``, ``MAT`` or ``MAT#k``).
+    """
+    return str(material_path).strip("/").split("/")[0]
