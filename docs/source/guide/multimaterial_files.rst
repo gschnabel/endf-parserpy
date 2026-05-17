@@ -132,8 +132,8 @@ disk only when it is accessed:
 
 A material is addressed by its zero-based position on the
 tape. Indexing an :class:`~endf_parserpy.EndfFile` returns a
-:class:`~endf_parserpy.tape.MaterialView` — a lightweight
-handle to one material — and iterating over the file yields
+:class:`~endf_parserpy.tape.MaterialView`, a lightweight
+handle to one material; iterating over the file yields
 these handles in turn:
 
 .. code:: Python
@@ -162,9 +162,9 @@ as a list of raw strings instead:
 A whole material can also be lifted out of the tape as an
 ordinary single-material tape dictionary with the
 :meth:`~endf_parserpy.tape.MaterialView.to_tape_dict` method.
-The result is a ``{MF: {MT: section}}`` mapping -- the same
-form a single-material parse produces, complete with its
-``MF=0``/``MT=0`` tape head -- so it can be handed straight to
+The result is a ``{MF: {MT: section}}`` mapping, the same
+form a single-material parse produces and complete with its
+``MF=0``/``MT=0`` tape head, so it can be handed straight to
 the parser's writer or to :func:`~endf_parserpy.write_tape`:
 
 .. code:: Python
@@ -173,8 +173,8 @@ the parser's writer or to :func:`~endf_parserpy.write_tape`:
    text = parser.write(material_dict)            # render it on its own
 
 Because the same material number (``MAT``) may occur several
-times on a tape — a PENDF tape repeats it for every
-temperature — materials are identified by position rather
+times on a tape (a PENDF tape repeats it for every
+temperature), materials are identified by position rather
 than by ``MAT``. The :meth:`~endf_parserpy.EndfFile.by_mat`,
 :meth:`~endf_parserpy.EndfFile.by_za` and
 :meth:`~endf_parserpy.EndfFile.find` methods look materials
@@ -211,9 +211,9 @@ written back:
    del endf_file[0][3, 18]               # delete a section
    del endf_file[1]                      # delete the second material
 
-A new material — an ordinary ``{MF: {MT: section}}`` mapping,
+A new material (an ordinary ``{MF: {MT: section}}`` mapping,
 such as one entry of a :func:`~endf_parserpy.parse_tape_file`
-result — is appended with
+result) is appended with
 :meth:`~endf_parserpy.EndfFile.append_material`, which
 returns a :class:`~endf_parserpy.tape.MaterialView` of the
 added material:
@@ -232,7 +232,7 @@ their positions to :meth:`~endf_parserpy.EndfFile.reorder`:
 
 Finally, :meth:`~endf_parserpy.EndfFile.export` writes the
 edited tape to a file and :meth:`~endf_parserpy.EndfFile.to_string`
-returns it as an ENDF-6 string -- the same memory/file pairing
+returns it as an ENDF-6 string, the same memory/file pairing
 as the module functions. Sections that were not edited keep
 their data records verbatim from disk; the SEND/FEND/MEND
 framing and the column 76-80 sequence numbers are regenerated
@@ -288,8 +288,8 @@ their sections and returns the matches as a list of
    room_temp = endf_file.query('1/451/TEMP', 293.6, tol=1.0)
    xs = room_temp[0][3, 1]      # MF=3/MT=1 of the first match
 
-The first argument is a path into an MF/MT section — here the
-``TEMP`` field of the MF1/MT451 section — and the second the
+The first argument is a path into an MF/MT section (here the
+``TEMP`` field of the MF1/MT451 section), and the second the
 value to match; the ``tol`` argument allows for a numerical
 tolerance. Instead of a value, a ``predicate`` callable can
 be supplied to match on an arbitrary condition:
@@ -347,8 +347,8 @@ The :meth:`~endf_parserpy.EndfFile.get` method has a shorter
 spelling: an :class:`~endf_parserpy.EndfFile` can be indexed
 directly with an :class:`~endf_parserpy.EndfMaterialPath`. The
 ``[]``, ``[]=``, ``del`` and ``in`` operators all accept such a
-path — a string or an :class:`~endf_parserpy.EndfMaterialPath`
-object — in addition to an integer material position, so a tape
+path (a string or an :class:`~endf_parserpy.EndfMaterialPath`
+object) in addition to an integer material position, so a tape
 reads and edits like a path-addressable mapping:
 
 .. code:: Python
@@ -360,8 +360,18 @@ reads and edits like a path-addressable mapping:
    del endf_file['#1']                   # delete a material
    present = '#0/1/451/TEMP' in endf_file  # test for presence
 
+Every such edit, whether a field write, a section or material
+deletion, an :meth:`~endf_parserpy.EndfFile.append_material` or a
+:meth:`~endf_parserpy.EndfFile.reorder`, only changes the
+in-memory tape. The file on disk is never touched until the tape
+is written out explicitly with
+:meth:`~endf_parserpy.EndfFile.export` (or
+:meth:`~endf_parserpy.EndfFile.to_string`); without that call the
+edits are discarded when the :class:`~endf_parserpy.EndfFile`
+object goes away.
+
 ``endf_file.get(path)`` is the explicit-method synonym of
-``endf_file[path]``; both return the same thing — a
+``endf_file[path]``; both return the same thing: a
 :class:`~endf_parserpy.tape.MaterialView` for a material-depth
 path, a section for an ``MF/MT`` path, and the value at the
 field for a deeper path.
@@ -429,8 +439,8 @@ access:
 The :attr:`~endf_parserpy.EndfFile.cache_nbytes` property reports
 the current ``(raw, parsed)`` cache occupancy, and the
 :meth:`~endf_parserpy.EndfFile.unload` method drops the cached
-sections of one material — or, with no argument, of the whole
-tape — without discarding any pending edits.
+sections of one material (or, with no argument, of the whole
+tape) without discarding any pending edits.
 
 The parser objects are picklable, so a configured parser can be
 shipped to a pool of worker processes. Together with the fast,
