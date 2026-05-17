@@ -54,6 +54,25 @@ def two_material_tape(tmp_path_factory, parser):
     return path
 
 
+@pytest.fixture(scope="module")
+def tape_with_bad_material(tmp_path_factory, two_material_tape):
+    """The 2-material tape with a data field of the 2nd material (MAT 3025)
+    corrupted, so that material #1 fails to parse while the structural
+    index stays intact."""
+    lines = Path(two_material_tape).read_text().splitlines(keepends=True)
+    corrupted = False
+    out = []
+    for line in lines:
+        if not corrupted and line[66:70] == "3025" and line[70:72] == " 3":
+            line = "BADBADBAD!!" + line[11:]
+            corrupted = True
+        out.append(line)
+    assert corrupted, "could not find an MF3 line of MAT 3025 to corrupt"
+    path = tmp_path_factory.mktemp("badtape") / "bad.endf"
+    path.write_text("".join(out))
+    return path
+
+
 # --- Phase 2: cmd_utils helper layer ---------------------------------------
 
 
@@ -113,3 +132,22 @@ def test_list_multi_material(two_material_tape):
     assert "2 materials" in result.stdout
     assert "#0" in result.stdout and "#1" in result.stdout
     assert "MAT=2925" in result.stdout and "MAT=3025" in result.stdout
+
+
+# --- Phase 4: the validate subcommand --------------------------------------
+
+
+def test_validate_multi_material_ok(two_material_tape):
+    result = run_cli(["validate", str(two_material_tape)])
+    assert result.returncode == 0
+    assert "ok - " in result.stdout
+    assert "failed" not in result.stdout
+
+
+def test_validate_multi_material_failure(tape_with_bad_material):
+    result = run_cli(["validate", str(tape_with_bad_material)])
+    assert result.returncode == 1
+    assert "failed - " in result.stdout
+    # the failure detail pinpoints the offending material
+    assert "material #1" in result.stdout
+    assert "MAT 3025" in result.stdout

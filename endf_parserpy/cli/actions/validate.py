@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2026/05/13
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -12,6 +12,7 @@
 from ..cmd_utils import (
     add_common_cmd_parser_args,
     get_endf_parser,
+    open_endf_file,
 )
 from glob import glob
 import sys
@@ -47,19 +48,45 @@ def perform_action(args):
     sys.exit(retcode)
 
 
+def _validate_file(parser, file):
+    """Validate every section of every material of ``file``.
+
+    Returns ``(ok, detail)``; ``detail`` is ``None`` on success and a
+    human-readable failure description otherwise. The file is opened as
+    an :class:`EndfFile`, so single- and multi-material files are
+    validated the same way -- a tape is valid only if every section of
+    every material parses.
+    """
+    try:
+        endf_file = open_endf_file(file, parser, on_error="raise")
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    multi = len(endf_file) > 1
+    for material in endf_file:
+        for mf, mt in material.sections():
+            try:
+                material[mf, mt]
+            except Exception as exc:  # noqa: BLE001
+                prefix = (
+                    f"material #{material.position} (MAT {material.mat}), "
+                    if multi
+                    else ""
+                )
+                return False, f"{prefix}section MF={mf}/MT={mt}:\n{exc}"
+    return True, None
+
+
 def _validate_endf_files(parser, files):
     any_failed = False
     file_status_list = []
     for file in files:
-        try:
-            parser.parsefile(file)
-            file_status_list.append((file, "ok"))
-        except Exception as exc:
+        ok, detail = _validate_file(parser, file)
+        file_status_list.append((file, "ok" if ok else "failed"))
+        if not ok:
             any_failed = True
-            file_status_list.append((file, "failed"))
             print("\n" + "=" * 80)
             print(f"  Validation of {file} failed for the following reason:\n")
-            print(str(exc))
+            print(detail)
 
     print("\n========== VALIDATION SUMMARY ==========")
     for file_status in file_status_list:
