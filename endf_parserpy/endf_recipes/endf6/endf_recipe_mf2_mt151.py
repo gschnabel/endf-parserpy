@@ -5,7 +5,7 @@
 # Creation date:   2022/05/30
 # Last modified:   2026/01/08
 # License:         MIT
-# Copyright (c) 2022 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2022-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
