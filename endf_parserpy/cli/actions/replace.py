@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2024/12/05
+# Last modified:   2026/05/17
 # License:         MIT
-# Copyright (c) 2024 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -15,10 +15,11 @@ import sys
 from ..cmd_utils import (
     add_common_cmd_parser_args,
     get_endf_parser,
-    create_backup_file,
-    determine_include,
+    open_endf_file,
+    resolve_material_path,
+    export_endf_file,
 )
-from endf_parserpy import EndfPath
+from endf_parserpy import EndfPath, EndfMaterialPath
 
 
 COMMAND_NAME = "replace"
@@ -47,10 +48,22 @@ def add_subparser(subparsers):
     )
 
 
+def _is_section_level(raw_path):
+    """Whether ``raw_path`` stops at section depth.
+
+    A path that stops at (or above) ``MF/MT`` swaps a whole section; a
+    longer path reaches into a section and replaces a single field.
+    """
+    raw_path = str(raw_path).strip()
+    if "#" in raw_path:
+        return EndfMaterialPath(raw_path).subpath is None
+    return len(EndfPath(raw_path)) <= 2
+
+
 def perform_action(args):
     assert args["subcommand"] == COMMAND_NAME
     create_backup = not args["no_backup"]
-    endfpath = EndfPath(args["endfpath"])
+    raw_path = args["endfpath"]
     sourcefile = args["sourcefile"]
     izm = args["ignore_zero_mismatch"]
     izm = False if izm is None else izm
@@ -59,13 +72,12 @@ def perform_action(args):
         "ignore_send_records": True,
         "ignore_missing_tpid": True,
     }
-    if len(endfpath) <= 2:
-        parser = get_endf_parser(args, override_args)
-    else:
-        # it's about a subtle replacement inside an MF/MT
-        # section and not just swapping out the entire MF/MT section
+    if not _is_section_level(raw_path):
+        # a subtle replacement inside an MF/MT section and not just
+        # swapping out the entire MF/MT section: keep the verbatim string
+        # representation of the section's other, untouched fields
         override_args["preserve_value_strings"] = True
-        parser = get_endf_parser(args, override_args)
+    parser = get_endf_parser(args, override_args)
 
     destfiles = []
     for fp in args["destfile"]:
@@ -77,23 +89,20 @@ def perform_action(args):
                 sys.exit(1)
         destfiles.extend(glob(fp))
     retcode = _replace_element(
-        parser, endfpath, sourcefile, destfiles, create_backup=create_backup
+        parser, raw_path, sourcefile, destfiles, create_backup=create_backup
     )
     sys.exit(retcode)
 
 
-def _replace_element(parser, endfpath, sourcefile, destfiles, create_backup):
-    if len(endfpath) <= 2:
-        include = []
-    else:
-        include = determine_include(endfpath)
-    source_dict = parser.parsefile(sourcefile, include=include)
-    obj = endfpath.get(source_dict)
-    del source_dict
+def _replace_element(parser, raw_path, sourcefile, destfiles, create_backup):
+    source = open_endf_file(sourcefile, parser)
+    obj = source[resolve_material_path(source, raw_path)]
+    # detach a section view to a standalone dict so it survives once the
+    # source EndfFile goes out of scope (a field path yields a scalar)
+    if hasattr(obj, "detach"):
+        obj = obj.detach()
     for outfile in destfiles:
-        dest_dict = parser.parsefile(outfile, include=include)
-        endfpath.set(dest_dict, obj)
-        if create_backup:
-            create_backup_file(outfile)
-        parser.writefile(outfile, dest_dict, overwrite=(not create_backup))
+        dest = open_endf_file(outfile, parser)
+        dest[resolve_material_path(dest, raw_path)] = obj
+        export_endf_file(dest, outfile, create_backup)
     return 0

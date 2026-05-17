@@ -18,7 +18,6 @@ import argparse
 from .. import (
     EndfParserPy,
     EndfParserCpp,
-    EndfPath,
     EndfFile,
 )
 
@@ -141,17 +140,6 @@ def get_endf_parser(args, args_override=None, allow_cpp=True):
     else:
         parser = EndfParserPy(**py_parser_args)
     return parser
-
-
-def determine_include(endfpath):
-    endfpath = EndfPath(endfpath)
-    if len(endfpath) == 0:
-        include = tuple()
-    elif len(endfpath) == 1:
-        include = (int(endfpath[0]),)
-    else:
-        include = ((int(endfpath[0]), int(endfpath[1])),)
-    return include
 
 
 def atomic_rename(src, dst):

@@ -385,3 +385,49 @@ def test_compare_multi_vs_single_partial(two_material_tape):
     assert result.returncode == 1
     assert "unpaired" in result.stdout
     assert "MAT 3025" in result.stdout
+
+
+# --- Phase 12: the replace subcommand --------------------------------------
+
+
+@pytest.fixture(scope="module")
+def donor_tape(tmp_path_factory, parser):
+    """A 2-material tape whose 2nd material (Zn-64) has a distinctive
+    MF3/MT2 AWR value, so a replacement from it is observable."""
+    cu = parse_tape_file(CU, parser=parser)[0]
+    zn = parse_tape_file(ZN, parser=parser)[0]
+    zn[3][2]["AWR"] = 999.0
+    path = tmp_path_factory.mktemp("donor") / "donor.endf"
+    write_tape_file([cu, zn], path, parser=parser, overwrite=True)
+    return path
+
+
+def test_replace_single_material_bare_path(modified_cu, parser, tmp_path):
+    """A selector-less replace works between two single-material files."""
+    work = tmp_path / "zn.endf"
+    shutil.copy(ZN, work)
+    result = run_cli(["replace", "-n", "3/2/AWR", str(modified_cu), str(work)])
+    assert result.returncode == 0
+    assert parse_tape_file(work, parser=parser)[0][3][2]["AWR"] == 62.389
+
+
+def test_replace_multi_material_with_selector(
+    donor_tape, two_material_tape, parser, tmp_path
+):
+    """A #-prefixed path replaces a field of the selected material only."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["replace", "-n", "#1/3/2/AWR", str(donor_tape), str(work)])
+    assert result.returncode == 0
+    materials = parse_tape_file(work, parser=parser)
+    assert materials[1][3][2]["AWR"] == 999.0
+    assert materials[0][3][2]["AWR"] == 62.389
+
+
+def test_replace_multi_material_bare_path_rejected(two_material_tape, tmp_path):
+    """On a multi-material destination a selector-less path is rejected."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["replace", "-n", "3/2/AWR", str(CU), str(work)])
+    assert result.returncode == 1
+    assert "2 materials" in result.stderr
