@@ -515,12 +515,13 @@ inline void write_section_verbatim(
   int mat = cpp_read_mat_number(first_line.c_str());
   int mf = cpp_read_mf_number(first_line.c_str());
   int mt = cpp_read_mt_number(first_line.c_str());
-  int linenum = (mf != 0) ? 1 : 0;  // linenum starts at 0 for tape head
+  int linenum = (mf != 0) ? 0 : -1;  // first written number is 0 for tape head
   for (const auto& item : mfmt_section) {
     std::string linestr = py::cast<std::string>(item);
     if (write_opts.include_linenum) {
       linestr.resize(80);
-      cpp_write_line_number(linestr, linenum++);
+      cpp_write_line_number(linestr, (linenum % 99999) + 1);
+      linenum++;
     } else {
       linestr.erase(75, std::string::npos);
     }

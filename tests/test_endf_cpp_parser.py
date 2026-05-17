@@ -199,3 +199,43 @@ def test_linenum_wraparound():
     assert max(linenums) == linenum_max
     assert len([lnum for lnum in linenums if lnum == 1]) > 1
     assert all(n == (m % linenum_max) + 1 for m, n in enumerate(linenums))
+
+
+def test_linenum_wraparound_verbatim():
+    # the verbatim writer (raw line-list sections, used when a section
+    # is written back unparsed) must wrap the column 76-80 sequence
+    # number at 99999 exactly as the parsed writer does
+    linenum_width = 5
+    linenum_max = 10**linenum_width - 1
+    numels = linenum_max * 3
+    parser = EndfParserCpp()
+    endf_dict = EndfDict()
+    endf_dict["3/1"] = {}
+    dd = endf_dict["3/1"]
+    dd["MAT"] = 2625
+    dd["MF"] = 3
+    dd["MT"] = 1
+    dd["ZA"] = 26054
+    dd["AWR"] = 53.47
+    dd["QM"] = 0.0
+    dd["QI"] = 0.0
+    dd["LR"] = 0
+    dd["xstable/E"] = [i * 0.01 for i in range(numels)]
+    dd["xstable/xs"] = [1.0 for i in range(numels)]
+    dd["xstable/NBT"] = [numels]
+    dd["xstable/INT"] = [2]
+    full = parser.write(endf_dict)
+    # take the MF=3 data records as a raw (unparsed) line-list section
+    # and write it back through the verbatim path
+    section_lines = [l for l in full if int(l[70:72]) == 3 and int(l[72:75]) != 0]
+    assert len(section_lines) > linenum_max  # the section does wrap
+    rewritten = parser.write({3: {1: section_lines}})
+    body = [l for l in rewritten if int(l[70:72]) == 3 and int(l[72:75]) != 0]
+    linenum_strs = [l[75:80] for l in body]
+    assert all(len(l) == 5 for l in linenum_strs)
+    assert all(len(l.rstrip("\n")) <= 80 for l in rewritten)
+    linenums = [int(l) for l in linenum_strs]
+    assert min(linenums) == 1
+    assert max(linenums) == linenum_max
+    assert len([lnum for lnum in linenums if lnum == 1]) > 1
+    assert all(n == (m % linenum_max) + 1 for m, n in enumerate(linenums))

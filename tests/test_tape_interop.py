@@ -170,3 +170,39 @@ def test_edit_via_endf_file_is_visible_to_ordinary_parser(parser, tmp_path):
     # the untouched material is unchanged
     zn_ordinary = parser.parsefile(str(ZN))
     assert materials[1][1][451]["AWR"] == zn_ordinary[1][451]["AWR"]
+
+
+# --------------------------------------------------------------------------
+# MaterialView.to_tape_dict as a single-material tape for the ordinary API
+# --------------------------------------------------------------------------
+
+
+def test_to_tape_dict_is_a_writable_single_material_tape(parser, tmp_path):
+    # to_tape_dict() carries the MF=0 tape head, so unlike per-section
+    # access it forms a complete tape the ordinary writer accepts and
+    # the ordinary parser round-trips
+    tape = tmp_path / "tape.endf"
+    write_tape_file(
+        [_read_lines(CU), _read_lines(ZN)], tape, parser=parser, overwrite=True
+    )
+    endf_file = EndfFile(tape, parser=parser)
+    for view in endf_file:
+        tape_dict = view.to_tape_dict()
+        assert 0 in tape_dict and 0 in tape_dict[0]  # MF=0/MT=0 tape head
+        reparsed = parser.parse(parser.write(tape_dict))
+        for mf, mt in view.sections():
+            assert view[mf, mt] == reparsed[mf][mt]
+
+
+def test_to_tape_dict_reflects_an_edit(parser, tmp_path):
+    # an edit made through the view shows up in its to_tape_dict output
+    tape = tmp_path / "tape.endf"
+    write_tape_file(
+        [_read_lines(CU), _read_lines(ZN)], tape, parser=parser, overwrite=True
+    )
+    endf_file = EndfFile(tape, parser=parser)
+    section = dict(endf_file[0][1, 451])
+    section["AWR"] = 61.25
+    endf_file[0][1, 451] = section
+    reparsed = parser.parse(parser.write(endf_file[0].to_tape_dict()))
+    assert reparsed[1][451]["AWR"] == 61.25

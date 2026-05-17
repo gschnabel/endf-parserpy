@@ -22,8 +22,11 @@ Each material is represented by a :class:`_MaterialSlot` that carries an
 edit overlay. Sections can be replaced, added or deleted and materials
 can be deleted, appended or reordered; :meth:`EndfFile.export` writes
 the edited tape back out and :meth:`EndfFile.to_string` returns it as
-text. Untouched sections are written verbatim from disk, so an unedited
-round trip is byte-exact.
+text. Untouched sections keep their data records verbatim from disk;
+the SEND/FEND/MEND framing and the column 76-80 sequence numbers are
+regenerated, so an unedited round trip preserves every data field
+byte-for-byte but is not necessarily byte-identical overall -- the same
+guarantee the ordinary writer gives.
 """
 
 import os
@@ -499,11 +502,18 @@ class EndfFile:
         material is render-checked immediately, exactly as a section
         assignment is, so a malformed section is rejected here rather
         than at :meth:`export` time.
+
+        The ``mat`` argument must agree with the MAT number the
+        material carries in its own records (the ``'MAT'`` key of a
+        parsed section, or the control field of a raw section's first
+        line); a mismatch is rejected, since the records, not the
+        argument, are what gets written to the tape.
         """
         self._ensure_valid()
+        mat = int(mat)
         slot = _MaterialSlot(
             original_position=None,
-            mat=int(mat),
+            mat=mat,
             za=None if za is None else int(za),
             awr=None if awr is None else float(awr),
         )
@@ -521,6 +531,13 @@ class EndfFile:
                         f"section MF={mf_mt[0]}/MT={mf_mt[1]} of the appended "
                         "material must be a mapping (parsed) or a list of "
                         "strings (raw)"
+                    )
+                section_mat = self._section_mat(section)
+                if section_mat is not None and section_mat != mat:
+                    raise ValueError(
+                        f"mat={mat} was given, but section MF={mf_mt[0]}/"
+                        f"MT={mf_mt[1]} of the material carries MAT="
+                        f"{section_mat}; the two must agree"
                     )
                 if self._check_edits == "eager":
                     self._check_section(*mf_mt, section)
@@ -770,6 +787,23 @@ class EndfFile:
                 f"MF={mf}/MT={mt} is not a valid section key; a material "
                 "section has MF >= 1 and MT >= 1"
             )
+
+    @staticmethod
+    def _section_mat(section):
+        """The MAT number a material section carries, or ``None``.
+
+        A parsed section is a mapping with a ``'MAT'`` key; a raw
+        section is a list of ENDF lines whose first line names the MAT
+        in its control field. ``None`` is returned when neither yields
+        a usable (positive) value.
+        """
+        if isinstance(section, Mapping):
+            mat = section.get("MAT")
+            return None if mat is None else int(mat)
+        if isinstance(section, list) and section:
+            mat = _control_numbers(section[0])[0]
+            return mat if mat > 0 else None
+        return None
 
     def _set_slot_section(self, slot, mf, mt, value):
         self._ensure_valid()
@@ -1123,9 +1157,12 @@ class EndfFile:
     def to_string(self):
         """Return the (possibly edited) tape as an ENDF-6 formatted string.
 
-        Untouched sections appear verbatim from disk (so an unedited
-        tape is reproduced byte for byte) and edited or added sections
-        are rendered by the parser. The result ends with a newline; use
+        Untouched sections keep their data records verbatim from disk
+        and edited or added sections are rendered by the parser; in both
+        cases the SEND/FEND/MEND framing and the column 76-80 sequence
+        numbers are regenerated, so every data field is preserved
+        byte-for-byte but the tape is not necessarily byte-identical to
+        the input. The result ends with a newline; use
         :meth:`str.splitlines` if a list of lines is needed. A tape from
         which every material has been deleted is written as its tape
         head (TPID) followed by the tape end (TEND).
@@ -1147,9 +1184,12 @@ class EndfFile:
 
         The tape is written one material at a time via a temporary file
         and an atomic replace, so peak memory stays bounded by a single
-        material regardless of the tape size. Untouched sections are
-        taken verbatim from disk (they are not parsed); edited and added
-        sections are rendered by the parser. An existing file is only
+        material regardless of the tape size. Untouched sections keep
+        their data records verbatim from disk (they are not parsed) and
+        edited or added sections are rendered by the parser; the
+        SEND/FEND/MEND framing and the column 76-80 sequence numbers are
+        regenerated either way, preserving every data field byte-for-byte
+        without making the tape byte-identical. An existing file is only
         overwritten when ``overwrite=True``. A tape from which every
         material has been deleted is written as its tape head (TPID)
         followed by the tape end (TEND).

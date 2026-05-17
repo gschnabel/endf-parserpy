@@ -271,6 +271,35 @@ def test_append_material_rejects_bad_section_type(tmp_path, parser):
     assert len(endf_file) == 1
 
 
+def test_append_material_rejects_mat_mismatch_raw(tmp_path, parser):
+    # the mat argument must agree with the MAT the material's records
+    # carry; for a raw (line-list) section that MAT comes from the
+    # control field of the first line
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    zn = parser.parse(_read_lines(ZN), exclude=RAW_EXCLUDE)  # raw sections
+    with pytest.raises(ValueError, match="MAT=3025"):
+        endf_file.append_material(zn, mat=9999)
+    assert len(endf_file) == 1  # nothing was appended
+
+
+def test_append_material_rejects_mat_mismatch_parsed(tmp_path, parser):
+    # the same check fires for a fully parsed material, whose MAT is
+    # read from the 'MAT' key of a section mapping
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    zn = parser.parse(_read_lines(ZN))  # fully parsed sections
+    with pytest.raises(ValueError, match="MAT=3025"):
+        endf_file.append_material(zn, mat=9999)
+    assert len(endf_file) == 1
+
+
+def test_append_material_accepts_matching_mat_parsed(tmp_path, parser):
+    # a parsed material whose 'MAT' agrees with the argument is appended
+    endf_file, _ = _open(tmp_path, parser, [CU])
+    zn = parser.parse(_read_lines(ZN))  # fully parsed sections
+    view = endf_file.append_material(zn, mat=3025)
+    assert len(endf_file) == 2 and view.mat == 3025
+
+
 def test_delete_material_drops_cached_view(tmp_path, parser):
     endf_file, _ = _open(tmp_path, parser, [CU, ZN])
     endf_file[0]  # materialise and cache the views

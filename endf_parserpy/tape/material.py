@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/16
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -118,6 +118,22 @@ class MaterialView:
         """Return the list of ``(MF, MT)`` section keys of this material."""
         self._check_live()
         return self._file._slot_section_keys(self._slot)
+
+    def to_tape_dict(self):
+        """Return this material as a complete single-material tape dict.
+
+        The result is a ``{MF: {MT: section}}`` mapping that, unlike the
+        per-section access of this view, also carries an ``MF=0``/
+        ``MT=0`` tape-head (TPID) entry. It therefore forms a complete
+        single-material tape and can be handed directly to the ordinary
+        parser's ``write`` -- ``parser.write(view.to_tape_dict())``
+        yields a tape the ordinary ``parser.parse`` round-trips.
+
+        Untouched sections appear as their raw ENDF-6 lines and edited
+        or added ones as parsed mappings; the writer accepts both.
+        """
+        self._check_live()
+        return self._file._assemble(self._slot)
 
     def __getitem__(self, key):
         self._check_live()
