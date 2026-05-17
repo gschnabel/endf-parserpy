@@ -49,6 +49,9 @@ CASES = [
     # so cross-MAT comparison intentionally changed; it is covered by
     # tests/test_cli_multimaterial.py instead.
     {"id": "compare_equal", "argv": ["compare", "{cu}", "{cu2}"]},
+    # explain_var: the golden return code was updated from 1 to 0 -- the
+    # pre-change `explain` fell through to cmd.py's trailing sys.exit(1)
+    # and so reported failure even on success; that bug has been fixed.
     {"id": "explain_var", "argv": ["explain", "3/2/AWR", "{cu}"]},
     {"id": "match_query", "argv": ["match", "{cu}", "--query", "exists(/3/2)"]},
     {

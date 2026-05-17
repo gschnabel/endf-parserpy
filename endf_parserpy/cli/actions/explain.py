@@ -35,6 +35,7 @@ def perform_action(args):
     assert args["subcommand"] == COMMAND_NAME
     parser = get_endf_parser(args, allow_cpp=False)
     _explain_endf_variable(parser, args["endfpath"], args["file"])
+    sys.exit(0)
 
 
 def _explain_endf_variable(parser, endfpath, file):

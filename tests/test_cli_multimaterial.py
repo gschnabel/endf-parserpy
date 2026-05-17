@@ -161,12 +161,14 @@ EXPLAIN_AWR = "ratio of the mass of the material to that of the neutron"
 def test_explain_single_material_bare_path():
     """A selector-less path still works on a single-material file."""
     result = run_cli(["explain", "1/451/AWR", str(CU)])
+    assert result.returncode == 0
     assert EXPLAIN_AWR in result.stdout
 
 
 def test_explain_multi_material_with_selector(two_material_tape):
     """A #-prefixed path explains a variable of the selected material."""
     result = run_cli(["explain", "#1/1/451/AWR", str(two_material_tape)])
+    assert result.returncode == 0
     assert EXPLAIN_AWR in result.stdout
 
 
@@ -195,6 +197,14 @@ def test_match_multi_material_selective(two_material_tape):
     assert result.returncode == 0
     assert "material #1, MAT 3025" in result.stdout
     assert "material #0" not in result.stdout
+
+
+def test_match_parse_failure_reported_on_stderr(tape_with_bad_material):
+    """A material that fails to parse is reported on stderr, not stdout."""
+    result = run_cli(["match", str(tape_with_bad_material), "--query", "exists(/3/2)"])
+    assert result.returncode == 1
+    assert "parsing failed" in result.stderr
+    assert "parsing failed" not in result.stdout
 
 
 # --- Phase 7: the show subcommand ------------------------------------------

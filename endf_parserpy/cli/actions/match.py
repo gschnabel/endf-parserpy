@@ -52,7 +52,7 @@ def _match_endf_files(parser, files, tree):
             endf_file = open_endf_file(file, parser, on_error="raise")
         except Exception:  # noqa: BLE001
             any_failed = True
-            print(f"parsing failed: {file}")
+            print(f"parsing failed: {file}", file=sys.stderr)
             continue
         multi = len(endf_file) > 1
         for material in endf_file:
@@ -63,7 +63,7 @@ def _match_endf_files(parser, files, tree):
                 endf_dict = parsed_material_dict(material)
             except Exception:  # noqa: BLE001
                 any_failed = True
-                print(f"parsing failed: {label}")
+                print(f"parsing failed: {label}", file=sys.stderr)
                 continue
             opts = {"filename": label, "print": "match"}
             eval_tree_print(tree, endf_dict, opts)

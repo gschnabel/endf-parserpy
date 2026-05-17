@@ -52,6 +52,6 @@ def _update_mf1mt451_directory(parser, file, create_backup):
         # as their raw on-disk lines, which is what to_tape_dict() yields.
         mat_dict = material.to_tape_dict()
         mat_dict[1][451] = material[1, 451].detach()
-        update_directory(mat_dict, parser, read_opts=parser.read_opts)
+        update_directory(mat_dict, parser)
         endf_file[f"#{material.position}/1/451"] = mat_dict[1][451]
     export_endf_file(endf_file, file, create_backup)
