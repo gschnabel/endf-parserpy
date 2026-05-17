@@ -181,6 +181,24 @@ def create_backup_file(file):
         raise OSError(f"Unable to create backup file for {file}")
 
 
+def export_endf_file(endf_file, file, create_backup):
+    """Write ``endf_file`` back to ``file``, optionally keeping a backup.
+
+    :meth:`EndfFile.export` needs the source file intact while it copies
+    the untouched sections verbatim, so when a backup is requested the
+    tape is first written to a sibling temporary file; only then is the
+    original moved aside as the ``.bak`` backup and the new file moved
+    into its place.
+    """
+    if create_backup:
+        tmp = file + ".endf-cli-tmp"
+        endf_file.export(tmp, overwrite=True)
+        create_backup_file(file)
+        atomic_rename(tmp, file)
+    else:
+        endf_file.export(file, overwrite=True)
+
+
 def open_endf_file(file, parser, **kwargs):
     """Open ``file`` as an :class:`EndfFile`, the uniform CLI access object.
 

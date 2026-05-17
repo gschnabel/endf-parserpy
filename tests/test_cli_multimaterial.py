@@ -290,3 +290,46 @@ def test_convert_multi_material_roundtrip(two_material_tape, parser, tmp_path):
     assert run_cli(["convert", str(js), str(rt), "--to", "endf"]).returncode == 0
     materials = parse_tape_file(rt, parser=parser)
     assert [m[1][451]["MAT"] for m in materials] == [2925, 3025]
+
+
+# --- Phase 10: the insert-text subcommand ----------------------------------
+
+MARKER = "INSERTED MARKER LINE"
+
+
+def _description(material):
+    from endf_parserpy.utils.endf6_plumbing import get_description
+
+    return get_description(material)
+
+
+def test_insert_text_single_material(tmp_path):
+    """A selector-less insert-text works on a single-material file."""
+    work = tmp_path / "cu.endf"
+    shutil.copy(CU, work)
+    result = run_cli(["insert-text", "-n", str(work)], stdin=MARKER + "\n")
+    assert result.returncode == 0
+    assert MARKER in _description(parse_tape_file(work)[0])
+
+
+def test_insert_text_multi_material_with_selector(two_material_tape, parser, tmp_path):
+    """-m selects which material of a tape receives the text."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["insert-text", "-n", "-m", "#1", str(work)], stdin=MARKER + "\n")
+    assert result.returncode == 0
+    materials = parse_tape_file(work, parser=parser)
+    assert MARKER not in _description(materials[0])
+    assert MARKER in _description(materials[1])
+
+
+def test_insert_text_multi_material_without_selector_rejected(
+    two_material_tape, tmp_path
+):
+    """On a multi-material tape insert-text requires -m/--material."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["insert-text", "-n", str(work)], stdin=MARKER + "\n")
+    assert result.returncode == 1
+    assert "2 materials" in result.stderr
+    assert "-m/--material" in result.stderr

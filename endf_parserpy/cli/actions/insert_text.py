@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2025/05/26
+# Last modified:   2026/05/17
 # License:         MIT
-# Copyright (c) 2024-2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -13,7 +13,9 @@ import sys
 from ..cmd_utils import (
     add_common_cmd_parser_args,
     get_endf_parser,
-    create_backup_file,
+    open_endf_file,
+    export_endf_file,
+    format_material_table,
 )
 from endf_parserpy import update_directory
 from endf_parserpy.utils.endf6_plumbing import insert_description
@@ -34,6 +36,14 @@ def add_subparser(subparsers):
     parser_instext.add_argument(
         "-l", "--line", type=int, default=0, help="after which line to insert the text"
     )
+    parser_instext.add_argument(
+        "-m",
+        "--material",
+        type=str,
+        default=None,
+        help="material selector (#k, MAT or MAT#k) identifying which "
+        "material to modify on a multi-material tape",
+    )
     parser_instext.add_argument("file", type=str, help="ENDF file")
 
 
@@ -41,15 +51,45 @@ def perform_action(args):
     assert args["subcommand"] == COMMAND_NAME
     parser = get_endf_parser(args)
     create_backup = not args["no_backup"]
-    _insert_mf1mt451_description(parser, args["line"], args["file"], create_backup)
+    _insert_mf1mt451_description(
+        parser, args["line"], args["material"], args["file"], create_backup
+    )
     sys.exit(0)
 
 
-def _insert_mf1mt451_description(parser, line_no, file, create_backup):
-    endf_dict = parser.parsefile(file, include=[(1, 451)])
+def _select_material(endf_file, selector):
+    """Return the MaterialView selected by ``selector``.
+
+    With no selector a single-material file resolves to its only
+    material; a multi-material file is rejected with a listing.
+    """
+    if selector is None:
+        if len(endf_file) == 1:
+            return endf_file[0]
+        msg = (
+            f"the file holds {len(endf_file)} materials; choose one with "
+            "-m/--material (#k for tape position k, MAT or MAT#k):\n"
+            + format_material_table(endf_file)
+        )
+        print(msg, file=sys.stderr)
+        sys.exit(1)
+    try:
+        return endf_file[selector]
+    except Exception as exc:  # noqa: BLE001
+        print(f"cannot select material {selector!r}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _insert_mf1mt451_description(parser, line_no, selector, file, create_backup):
+    endf_file = open_endf_file(file, parser)
+    material = _select_material(endf_file, selector)
     text = sys.stdin.read()
-    insert_description(endf_dict, text, after_line=line_no)
-    update_directory(endf_dict, parser)
-    if create_backup:
-        create_backup_file(file)
-    parser.writefile(file, endf_dict, overwrite=(not create_backup))
+    # insert_description() and update_directory() need a complete
+    # single-material tape dict with MF1/MT451 as a parsed mapping; the
+    # other sections may stay as their raw on-disk lines.
+    mat_dict = material.to_tape_dict()
+    mat_dict[1][451] = material[1, 451].detach()
+    insert_description(mat_dict, text, after_line=line_no)
+    update_directory(mat_dict, parser)
+    endf_file[f"#{material.position}/1/451"] = mat_dict[1][451]
+    export_endf_file(endf_file, file, create_backup)
