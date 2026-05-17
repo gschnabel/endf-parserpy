@@ -254,7 +254,7 @@ inline double endfstr2float(const char* str, ParsingOptions &parse_opts) {
         continue;
       } else {
         std::stringstream errmsg;
-        errmsg << "encontered number with spaces: \""
+        errmsg << "encountered number with spaces: \""
                << std::string(str, 11) << "\"" << std::endl;
         throw std::runtime_error(errmsg.str());
       }
