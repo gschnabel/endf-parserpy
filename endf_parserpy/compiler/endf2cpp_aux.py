@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/03/28
-# Last modified:   2024/10/28
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2024 International Atomic Energy Agency (IAEA)
 #
@@ -234,7 +234,13 @@ class ListBodyRecorder:
         code += cpp.statement(f"int cpp_npl = {npl_val}", cpp.INDENT)
         code += cpp.statement("int cpp_i = 0", cpp.INDENT)
         code += cpp.statement("int cpp_j = 0", cpp.INDENT)
-        code += cpp.indent_code(get_prepare_line_func(vardict)(vardict), cpp.INDENT)
+        # only read the first body line if the LIST is non-empty; an
+        # NPL=0 LIST occupies its header line only, and an unconditional
+        # read would consume the following record (e.g. the SEND)
+        code += cpp.indent_code(
+            cpp.pureif("cpp_npl > 0", get_prepare_line_func(vardict)(vardict)),
+            cpp.INDENT,
+        )
         return code
 
     @staticmethod
