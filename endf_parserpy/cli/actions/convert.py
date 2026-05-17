@@ -3,9 +3,9 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2025/03/24
-# Last modified:   2025/05/10
+# Last modified:   2026/05/17
 # License:         MIT
-# Copyright (c) 2025 International Atomic Energy Agency (IAEA)
+# Copyright (c) 2025-2026 International Atomic Energy Agency (IAEA)
 #
 ############################################################
 
@@ -16,6 +16,7 @@ from ..cmd_utils import (
     add_common_cmd_parser_args,
     get_endf_parser,
 )
+from endf_parserpy import parse_tape_file, write_tape_file
 from endf_parserpy.utils.user_tools import sanitize_fieldname_types
 
 
@@ -64,15 +65,23 @@ def perform_action(args):
 
 def _convert_to_json(parser, sourcefile, destfile, json_dump_kwargs):
     destfile = Path(destfile)
-    endf_dict = parser.parsefile(sourcefile)
+    materials = parse_tape_file(sourcefile, parser=parser, on_error="raise")
+    # A single-material tape is written as a JSON object, a multi-material
+    # tape as a JSON array of material objects (design decision D); the
+    # json->endf direction tells the two apart by container type.
+    payload = materials[0] if len(materials) == 1 else materials
     with open(destfile, "w") as f:
-        json.dump(endf_dict, f, **json_dump_kwargs)
+        json.dump(payload, f, **json_dump_kwargs)
     return 0
 
 
 def _convert_to_endf(parser, sourcefile, destfile):
     with open(sourcefile, "r") as f:
-        endf_dict = json.load(f)
-    sanitize_fieldname_types(endf_dict)
-    parser.writefile(destfile, endf_dict)
+        endf_data = json.load(f)
+    # A JSON array is a multi-material tape, a JSON object a single
+    # material; both are written through the multi-material tape writer.
+    materials = endf_data if isinstance(endf_data, list) else [endf_data]
+    for material in materials:
+        sanitize_fieldname_types(material)
+    write_tape_file(materials, destfile, parser=parser)
     return 0

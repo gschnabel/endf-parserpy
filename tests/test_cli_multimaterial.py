@@ -252,3 +252,41 @@ def test_update_directory_multi_material(two_material_tape, parser, tmp_path):
         mt451 = material[1, 451]
         listed = set(zip(mt451["MFx"].values(), mt451["MTx"].values()))
         assert listed == set(material.sections())
+
+
+# --- Phase 9: the convert subcommand ---------------------------------------
+
+
+def test_convert_single_material_json_is_object(tmp_path):
+    """A single-material tape converts to a JSON object."""
+    out = tmp_path / "cu.json"
+    result = run_cli(["convert", str(CU), str(out), "--to", "json"])
+    assert result.returncode == 0
+    import json
+
+    data = json.loads(out.read_text())
+    assert isinstance(data, dict)
+
+
+def test_convert_multi_material_json_is_array(two_material_tape, tmp_path):
+    """A multi-material tape converts to a JSON array of materials."""
+    out = tmp_path / "tape.json"
+    result = run_cli(["convert", str(two_material_tape), str(out), "--to", "json"])
+    assert result.returncode == 0
+    import json
+
+    data = json.loads(out.read_text())
+    assert isinstance(data, list) and len(data) == 2
+
+
+def test_convert_multi_material_roundtrip(two_material_tape, parser, tmp_path):
+    """endf -> json -> endf preserves both materials of a tape."""
+    js = tmp_path / "tape.json"
+    rt = tmp_path / "roundtrip.endf"
+    assert (
+        run_cli(["convert", str(two_material_tape), str(js), "--to", "json"]).returncode
+        == 0
+    )
+    assert run_cli(["convert", str(js), str(rt), "--to", "endf"]).returncode == 0
+    materials = parse_tape_file(rt, parser=parser)
+    assert [m[1][451]["MAT"] for m in materials] == [2925, 3025]
