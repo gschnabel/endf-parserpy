@@ -221,7 +221,12 @@ added material:
 .. code:: Python
 
    donor = parse_tape_file('other.endf')[0]            # a material dictionary
-   new_material = endf_file.append_material(donor, mat=9999)
+   mat = donor[1][451]['MAT']                          # the MAT it carries
+   new_material = endf_file.append_material(donor, mat=mat)
+
+The ``mat`` argument must equal the MAT number the material
+carries in its own records; it is rejected otherwise, since the
+records, not the argument, are what gets written to the tape.
 
 The materials can be reordered by passing a permutation of
 their positions to :meth:`~endf_parserpy.EndfFile.reorder`:
@@ -333,8 +338,14 @@ for the material at position ``k``:
 .. code:: Python
 
    endf_file.get('#0/1/451/AWR')        # AWR of the material at position 0
-   endf_file.get('2925/3/2')            # the whole MF=3/MT=2 section of MAT 2925
+   endf_file.get('2925#0/3/2')          # MF=3/MT=2 of the 1st MAT-2925 material
    endf_file.get('2925#1/1/451/TEMP')   # a field of the 2nd MAT-2925 material
+
+A bare ``MAT`` number with no ``#k`` selector picks the material
+with that ``MAT`` only when it is unique on the tape; if the
+``MAT`` number repeats, as it does on a PENDF tape, it must be
+qualified with ``#k`` or the lookup raises
+:class:`~endf_parserpy.tape.AmbiguousMaterialError`.
 
 The path may stop at a section, in which case the whole
 section is returned, or continue into it to address a single
