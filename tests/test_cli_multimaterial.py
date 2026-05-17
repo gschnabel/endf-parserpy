@@ -151,3 +151,28 @@ def test_validate_multi_material_failure(tape_with_bad_material):
     # the failure detail pinpoints the offending material
     assert "material #1" in result.stdout
     assert "MAT 3025" in result.stdout
+
+
+# --- Phase 5: the explain subcommand ---------------------------------------
+
+EXPLAIN_AWR = "ratio of the mass of the material to that of the neutron"
+
+
+def test_explain_single_material_bare_path():
+    """A selector-less path still works on a single-material file."""
+    result = run_cli(["explain", "1/451/AWR", str(CU)])
+    assert EXPLAIN_AWR in result.stdout
+
+
+def test_explain_multi_material_with_selector(two_material_tape):
+    """A #-prefixed path explains a variable of the selected material."""
+    result = run_cli(["explain", "#1/1/451/AWR", str(two_material_tape)])
+    assert EXPLAIN_AWR in result.stdout
+
+
+def test_explain_multi_material_bare_path_rejected(two_material_tape):
+    """On a multi-material tape a selector-less path is rejected."""
+    result = run_cli(["explain", "1/451/AWR", str(two_material_tape)])
+    assert result.returncode == 1
+    assert "2 materials" in result.stderr
+    assert "#0" in result.stderr and "#1" in result.stderr
