@@ -193,7 +193,7 @@ class _ScanState:
 
     def __init__(self):
         self.materials = []
-        self.cur = None  # material under construction
+        self.cur = None  # the MaterialIndexEntry under construction, or None
         self.sec_key = None  # (MF, MT) of the section under construction
         self.sec_offset = 0
         self.sec_length = 0
@@ -204,7 +204,7 @@ class _ScanState:
     def flush_section(self):
         # store a section that was left open (e.g. a missing SEND record)
         if self.sec_key is not None and self.cur is not None:
-            self.cur["sections"][self.sec_key] = SectionIndexEntry(
+            self.cur.sections[self.sec_key] = SectionIndexEntry(
                 self.sec_offset, self.sec_length, self.sec_lines
             )
         self.sec_key = None
@@ -229,13 +229,17 @@ def _consume_run(st, mat, mf, mt, offset, length, line_count, head_line):
         return
     if mat > 0 and mf > 0 and mt > 0:  # regular section record(s)
         if st.cur is None:
-            st.cur = {
-                "position": len(st.materials),
-                "mat": mat,
-                "byte_offset": offset,
-                "sections": {},
-            }
-            st.cur["za"], st.cur["awr"] = _read_za_awr(head_line)
+            za, awr = _read_za_awr(head_line)
+            # built up field by field as the scan proceeds; byte_length
+            # stays a placeholder until the closing MEND record is seen
+            st.cur = MaterialIndexEntry(
+                position=len(st.materials),
+                mat=mat,
+                za=za,
+                awr=awr,
+                byte_offset=offset,
+                byte_length=0,
+            )
         if (mf, mt) != st.sec_key:
             st.flush_section()
             st.sec_key = (mf, mt)
@@ -246,15 +250,15 @@ def _consume_run(st, mat, mf, mt, offset, length, line_count, head_line):
         st.sec_lines += line_count
     elif mf != 0 and mt == 0:  # SEND: end of section
         if st.sec_key is not None and st.cur is not None:
-            st.cur["sections"][st.sec_key] = SectionIndexEntry(
+            st.cur.sections[st.sec_key] = SectionIndexEntry(
                 st.sec_offset, st.sec_length + length, st.sec_lines + line_count
             )
         st.sec_key = None
     elif mat == 0 and mf == 0 and mt == 0:  # MEND: end of material
         st.flush_section()
         if st.cur is not None:
-            st.cur["byte_length"] = offset + length - st.cur["byte_offset"]
-            st.materials.append(MaterialIndexEntry(**st.cur))
+            st.cur.byte_length = offset + length - st.cur.byte_offset
+            st.materials.append(st.cur)
             st.cur = None
     else:  # FEND (mat > 0, mf == 0, mt == 0), or any other record
         # a section cannot continue across such a record
