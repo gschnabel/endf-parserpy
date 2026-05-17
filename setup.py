@@ -96,12 +96,23 @@ class CustomBuildExt(pybind11_build_ext):
     def _create_dynamic_files(self):
         # package functionality is already needed during building the package
         add_project_dir_to_syspath()
-        from endf_parserpy.compiler.compiler import _prepare_cpp_parsers_subpackage
+        from endf_parserpy.compiler.compiler import (
+            _prepare_cpp_parsers_subpackage,
+            is_shared_chunk_filename,
+        )
 
         logger.info("Generating C++ modules for ENDF-6 files.")
         cpp_files = _prepare_cpp_parsers_subpackage(
             overwrite=True, only_filenames=False
         )
+        # Record exactly the shared translation units that were just
+        # generated, so the shared-TU pre-compile uses this authoritative
+        # list rather than rediscovering files on disk.
+        self._shared_tu_files = [
+            os.path.basename(f)
+            for f in cpp_files
+            if is_shared_chunk_filename(os.path.basename(f))
+        ]
 
     def finalize_options(self):
         super().finalize_options()
@@ -135,14 +146,22 @@ class CustomBuildExt(pybind11_build_ext):
         wrong flags.
         """
         cpp_parsers_dir = os.path.join("endf_parserpy", "cpp_parsers")
-        shared_sources = []
-        # Both layouts are supported: a single _shared.cpp (legacy) or
-        # _shared_part_NN.cpp chunks emitted by the codegen.
-        for name in sorted(os.listdir(cpp_parsers_dir)):
-            if name == "_shared.cpp" or (
-                name.startswith("_shared_part_") and name.endswith(".cpp")
-            ):
-                shared_sources.append(os.path.join(cpp_parsers_dir, name))
+        # Use the authoritative list of shared TUs produced by the code
+        # generator in _create_dynamic_files, not a directory scan, so a
+        # stale shared file from a previous build with a different layout
+        # cannot be compiled and linked alongside the current ones. Fall
+        # back to a directory scan only if generation did not run.
+        shared_names = getattr(self, "_shared_tu_files", None)
+        if shared_names is None:
+            shared_names = [
+                name
+                for name in os.listdir(cpp_parsers_dir)
+                if name == "_shared.cpp"
+                or (name.startswith("_shared_part_") and name.endswith(".cpp"))
+            ]
+        shared_sources = [
+            os.path.join(cpp_parsers_dir, name) for name in sorted(shared_names)
+        ]
         if not shared_sources:
             return
         # Filter shared sources out of every extension's source list so

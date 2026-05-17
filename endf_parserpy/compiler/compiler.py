@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/04/23
-# Last modified:   2026/05/13
+# Last modified:   2026/05/17
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -115,6 +115,16 @@ def _prepare_cpp_parsers_subpackage(
             )
     if only_filenames:
         return filenames
+
+    # Remove shared translation units left by any previous build. A
+    # changed layout (different chunk count, or dedup toggled off)
+    # would otherwise leave stale _shared*.cpp files that the build
+    # picks up alongside the current ones, causing duplicate-symbol
+    # link errors.
+    if overwrite:
+        for name in os.listdir(cpp_parsers_dir):
+            if is_shared_chunk_filename(name):
+                os.remove(os.path.join(cpp_parsers_dir, name))
 
     shared_registry = {} if dedup else None
     for endf_flavor, module_file in zip(endf_flavors, flavor_filenames):
