@@ -5,6 +5,7 @@ multi-material behaviour. Subcommand cases run endf-cli as a subprocess
 against single- and multi-material fixtures.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,19 @@ ZN = TESTDATA / "n_3025_30-Zn-64.endf"
 @pytest.fixture(scope="module")
 def parser():
     return EndfParserCpp()
+
+
+def run_cli(argv, cwd=None, stdin=None):
+    """Run endf-cli as a subprocess against the in-repo source."""
+    env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONHASHSEED": "0"}
+    return subprocess.run(
+        [sys.executable, "-m", "endf_parserpy.cli.cmd", *argv],
+        cwd=cwd,
+        input=stdin,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -81,3 +95,21 @@ def test_format_material_table(two_material_tape, parser):
     table = format_material_table(open_endf_file(two_material_tape, parser))
     assert "#0" in table and "#1" in table
     assert "MAT=2925" in table and "MAT=3025" in table
+
+
+# --- Phase 3: the list subcommand ------------------------------------------
+
+
+def test_list_single_material():
+    result = run_cli(["list", str(CU)])
+    assert result.returncode == 0
+    assert "1 material" in result.stdout
+    assert "MAT=2925" in result.stdout
+
+
+def test_list_multi_material(two_material_tape):
+    result = run_cli(["list", str(two_material_tape)])
+    assert result.returncode == 0
+    assert "2 materials" in result.stdout
+    assert "#0" in result.stdout and "#1" in result.stdout
+    assert "MAT=2925" in result.stdout and "MAT=3025" in result.stdout
