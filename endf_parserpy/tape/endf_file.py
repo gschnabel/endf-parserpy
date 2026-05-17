@@ -34,6 +34,8 @@ from contextlib import contextmanager
 from collections.abc import Mapping
 
 from ..endf_parser_factory import EndfParserFactory
+from ..interpreter.endf_parser import EndfParserPy
+from ..cpp_parsers.endf_parser_cpp import EndfParserCpp
 from .address import (
     EndfMaterialPath,
     parse_index_spec,
@@ -68,10 +70,29 @@ _VALID_MODES = ("index", "load_raw", "parse_all")
 _VALID_CHECK_EDITS = ("eager", "deferred")
 # _VALID_ON_ERROR is shared with operations.py -- the on_error policy is
 # the same concept for EndfFile and for the parse_tape functions.
-_BACKEND_OF = {"EndfParserCpp": "cpp", "EndfParserPy": "python"}
 
 # sentinel distinguishing "no value given" from an explicit value of None
 _UNSET = object()
+
+
+def _backend_of(parser):
+    """Return the engine name (``"cpp"``/``"python"``) of a parser.
+
+    A pickled :class:`EndfFile` stores only this name and recreates the
+    parser from it on unpickling, since the parser object itself is not
+    picklable. The check is by :func:`isinstance`, so a subclass of
+    either engine is still recognised, and an unrecognised parser is
+    rejected outright rather than silently mapped to a default engine
+    that a pickle round-trip would then swap in.
+    """
+    if isinstance(parser, EndfParserCpp):
+        return "cpp"
+    if isinstance(parser, EndfParserPy):
+        return "python"
+    raise TypeError(
+        f"unsupported parser type {type(parser).__name__}; EndfFile needs an "
+        "EndfParserCpp or EndfParserPy, as created by EndfParserFactory.create()"
+    )
 
 
 def _value_match(field, value, tol):
@@ -217,7 +238,7 @@ class EndfFile:
             )
         self._path = os.fspath(filename)
         self._parser = parser or EndfParserFactory.create(select="fastest")
-        self._backend = _BACKEND_OF.get(type(self._parser).__name__, "fastest")
+        self._backend = _backend_of(self._parser)
         self._on_error = on_error
         self._check_edits = check_edits
         self._verify_source = verify_source

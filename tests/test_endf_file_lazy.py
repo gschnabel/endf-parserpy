@@ -298,3 +298,22 @@ def test_pickle_roundtrip(tape_file, parser):
     assert len(restored) == 3
     assert restored.cache_nbytes == (0, 0)  # caches are not pickled
     assert dict(restored[0][1, 451]) == expected
+
+
+def test_pickle_preserves_parser_engine(tape_file, parser):
+    # the parser object itself is not picklable, so EndfFile records its
+    # engine and recreates a parser of the same engine on unpickling
+    endf_file = EndfFile(tape_file, parser=parser)
+    restored = pickle.loads(pickle.dumps(endf_file))
+    assert type(restored.parser) is type(endf_file.parser)
+
+
+def test_unrecognised_parser_is_rejected(tape_file):
+    # a parser that is neither EndfParserCpp nor EndfParserPy has no known
+    # engine name; it is rejected at construction rather than silently
+    # mapped to a default engine that a pickle round-trip would swap in
+    class NotAParser:
+        pass
+
+    with pytest.raises(TypeError, match="unsupported parser type"):
+        EndfFile(tape_file, parser=NotAParser())
