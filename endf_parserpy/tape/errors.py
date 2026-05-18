@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/16
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -30,7 +30,7 @@ class TapeStructureError(TapeError):
 class AmbiguousMaterialError(TapeError, LookupError):
     """Raised when a MAT number matches several materials.
 
-    PENDF/GENDF tapes repeat the same MAT number at different
+    PENDF tapes repeat the same MAT number at different
     temperatures. A lookup by MAT number then needs an ``occurrence``
     index to select among them.
 

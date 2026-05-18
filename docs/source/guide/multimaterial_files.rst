@@ -7,8 +7,8 @@ An ENDF-6 file may contain several materials, stored one
 after another; such a file is traditionally called a *tape*.
 The :ref:`ordinary parser <getting_started_sec>` expects a
 single material per file, but ``endf-parserpy`` provides a
-dedicated interface for tapes. It also covers the PENDF and
-GENDF tapes produced by :ref:`processing codes <related_software>`,
+dedicated interface for tapes. It also covers the PENDF
+tapes produced by :ref:`processing codes <related_software>`,
 which repeat the same material at several temperatures.
 On this page, we explain how to read, write and navigate
 such files.

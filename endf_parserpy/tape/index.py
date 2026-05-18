@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -117,7 +117,7 @@ class MaterialIndexEntry:
         Zero-based position of the material on the tape; this is the
         material's canonical identity (see design decision D1).
     mat : int
-        ENDF MAT number. Not unique: PENDF/GENDF tapes repeat the same
+        ENDF MAT number. Not unique: PENDF tapes repeat the same
         MAT at different temperatures.
     za : int or None
         ZA identifier (``1000*Z + A``) from the first HEAD record, or

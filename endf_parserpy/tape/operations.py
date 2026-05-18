@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -12,7 +12,7 @@
 """Eager multi-material parsing and writing of ENDF tapes.
 
 These functions add support for ENDF files that contain several
-materials (multi-material *tapes*, including PENDF/GENDF files that
+materials (multi-material *tapes*, including PENDF files that
 repeat the same material at different temperatures). A tape is split
 into single-material chunks by :func:`~endf_parserpy.tape.splitter.split_materials`
 and each chunk is handed to an ordinary single-material parser. The

@@ -31,7 +31,7 @@ libraries, such as
 [ENDF/B](https://www.nndc.bnl.gov/endf/),
 [JEFF](https://www.oecd-nea.org/dbdata/jeff/),
 and [JENDL](https://wwwndc.jaea.go.jp/jendl/jendl.html).
-Files that bundle several materials — including PENDF and GENDF tapes
+Files that bundle several materials — including PENDF tapes
 that repeat the same material at different temperatures — are
 supported both as plain lists of materials and through a lazy,
 memory-bounded `EndfFile` interface for large files.

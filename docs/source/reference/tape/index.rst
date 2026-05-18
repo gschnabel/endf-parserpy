@@ -5,7 +5,7 @@ tape
 
 The ``endf_parserpy.tape`` module provides support for ENDF-6
 files that contain several materials, traditionally called
-*tapes*. This includes the PENDF and GENDF tapes produced by
+*tapes*. This includes the PENDF tapes produced by
 :ref:`processing codes <related_software>`, which repeat the
 same material at several temperatures.
 

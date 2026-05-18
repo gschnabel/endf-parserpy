@@ -70,8 +70,8 @@ of the major nuclear data libraries, such as
 `ENDF/B <https://www.nndc.bnl.gov/endf/>`_,
 `JEFF <https://www.oecd-nea.org/dbdata/jeff/>`_,
 and `JENDL <https://wwwndc.jaea.go.jp/jendl/jendl.html>`_.
-Files that bundle several materials, including PENDF and
-GENDF tapes, are supported as well; see the guide on
+Files that bundle several materials, including PENDF
+tapes, are supported as well; see the guide on
 :doc:`multi-material files <guide/multimaterial_files>`.
 
 

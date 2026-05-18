@@ -15,8 +15,8 @@ may legally contain many materials, each terminated by a MEND record, the whole
 tape terminated by TEND. This excludes:
 
 * multi-material library tapes;
-* **PENDF / GENDF** files, where the *same* MAT number is repeated once per
-  temperature (NJOY BROADR/GROUPR output).
+* **PENDF** files, where the *same* MAT number is repeated once per
+  temperature (NJOY BROADR output).
 
 This plan adds (a) multi-material parse/write and (b) an optional lazy,
 indexed, memory-bounded access mode — without changing any existing behaviour.
