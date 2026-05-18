@@ -10,7 +10,6 @@
 ############################################################
 
 from glob import glob
-import os
 import sys
 from ..cmd_utils import (
     add_common_cmd_parser_args,
@@ -221,13 +220,10 @@ def perform_action(args):
 
     destfiles = []
     for fp in args["destfile"]:
-        curfiles1 = glob(fp)
-        curfiles2 = [fp]
-        if all(f1 == f2 for f1, f2 in zip(curfiles1, curfiles2)):
-            if not os.path.exists(fp):
-                print(f"File {fp} does not exist", file=sys.stderr)
-                sys.exit(1)
-        destfiles.extend(glob(fp))
+        matches = glob(fp)
+        if not matches:
+            _fail(f"file {fp} does not exist")
+        destfiles.extend(matches)
     retcode = _replace_element(
         parser, source_path, target_path, sourcefile, destfiles, create_backup
     )

@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -98,7 +98,7 @@ def add_common_cmd_parser_args(parser, defaults=None):
             kwargs["action"] = "store_const"
         else:
             kwargs["type"] = arg_type
-            kwargs["nargs"]: "?"
+            kwargs["nargs"] = "?"
         parser.add_argument(f"--{arg_str}", **kwargs)
 
 
@@ -240,8 +240,8 @@ def resolve_material_path(endf_file, raw_path):
         return f"#0/{raw_path}" if raw_path else "#0"
     msg = (
         f"the file holds {len(endf_file)} materials; prefix the path with "
-        "a material selector (#k for tape position k, MAT for the material "
-        "with that MAT number, or MAT#k for its k-th occurrence):\n"
+        "a material selector (#k for the material at tape position k, or "
+        "MAT#k for the k-th material with that MAT number):\n"
         + format_material_table(endf_file)
     )
     print(msg, file=sys.stderr)

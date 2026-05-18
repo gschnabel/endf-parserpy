@@ -9,7 +9,6 @@
 #
 ############################################################
 
-import os
 import sys
 from glob import glob
 from ..cmd_utils import (

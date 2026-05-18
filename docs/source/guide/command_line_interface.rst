@@ -211,7 +211,7 @@ advanced example, a specific spingroup in MF2/MT151, can be replaced by
 
 During this fine-grained replacement, the :ref:`original string representation
 of float numbers is preserved <guide_perfect_precision>`.
-By default, a backup of the original file will be created with endfing ``.bak``.
+By default, a backup of the original file will be created with ending ``.bak``.
 If you want to skip the creation of a backup file, supply the ``-n`` argument.
 
 The path may also address coarser units than a single section. An
@@ -254,8 +254,8 @@ section, both a whole MF file or both a whole material).
 Inserting a material into a tape
 --------------------------------
 
-Whereas ``replace`` edits material(s) that already exist, the ``insert``
-subcommand adds a whole *new* material from one file into a
+Whereas ``replace`` edits material(s) that already exist, the
+``insert-material`` subcommand adds a whole *new* material from one file into a
 :ref:`tape <cli_multimaterial>`:
 
 .. code-block:: bash

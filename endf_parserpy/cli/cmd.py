@@ -14,7 +14,6 @@ import sys
 import logging
 import importlib
 from endf_parserpy.interpreter.logging_utils import setup_logger
-from endf_parserpy.utils.user_tools import show_content
 
 
 ACTIONS = (
