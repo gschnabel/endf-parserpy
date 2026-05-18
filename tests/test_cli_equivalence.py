@@ -94,7 +94,16 @@ def _run_case(case, workdir):
     # Pin the hash seed: some reporting paths (e.g. compare_objects) iterate
     # sets, whose order otherwise varies between processes and would make
     # the captured stdout non-reproducible.
-    env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONHASHSEED": "0"}
+    #
+    # Do not force PYTHONPATH onto the source tree here: a fresh source
+    # checkout (as in CI) carries no compiled cpp extension -- those are
+    # build artifacts that pip installs into the installed package only --
+    # so pinning the subprocess to the source tree would leave the CLI
+    # without its default cpp parser and crash it. Inheriting the ambient
+    # environment makes the subprocess resolve endf_parserpy the same way
+    # the pytest process itself did (installed package, or whatever the
+    # developer put on PYTHONPATH).
+    env = {**os.environ, "PYTHONHASHSEED": "0"}
     proc = subprocess.run(
         [sys.executable, "-m", "endf_parserpy.cli.cmd", *argv],
         cwd=workdir,
