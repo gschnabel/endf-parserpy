@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -20,7 +20,7 @@ from ..cmd_utils import (
     selector_of,
     export_endf_file,
 )
-from endf_parserpy import EndfPath, EndfMaterialPath, write_tape_file
+from endf_parserpy import EndfPath, EndfMaterialPath
 
 
 COMMAND_NAME = "replace"
@@ -36,7 +36,19 @@ def add_subparser(subparsers):
         help="disable creation of backup file (suffix .bak)",
     )
     parser_replace.add_argument(
-        "endfpath", type=str, help="EndfPath to object in ENDF file"
+        "--source-path",
+        dest="source_path",
+        type=str,
+        default=None,
+        help="path to the object in the source file, when it differs from "
+        "the target path (e.g. a different material selector); defaults "
+        "to the target path",
+    )
+    parser_replace.add_argument(
+        "endfpath",
+        type=str,
+        help="path to the object in the target file; also used for the "
+        "source file unless --source-path is given",
     )
     parser_replace.add_argument(
         "sourcefile", type=str, help="file from which object should be retrieved"
@@ -49,25 +61,33 @@ def add_subparser(subparsers):
     )
 
 
-def _is_section_level(raw_path):
-    """Whether ``raw_path`` stops at (or above) section depth.
+def _fail(message):
+    """Print a clean one-line error and exit with status 1."""
+    print(f"replace: {message}", file=sys.stderr)
+    sys.exit(1)
 
-    A path that stops at (or above) ``MF/MT`` swaps a whole section (or a
-    whole MF file, or a whole material); a longer path reaches into a
-    section and replaces a single field.
+
+def _is_field_path(raw_path):
+    """Whether ``raw_path`` reaches into a section (i.e. is field-depth).
+
+    A malformed path is treated as not field-depth; the genuine error is
+    reported later, when the path is resolved against a file.
     """
     raw_path = str(raw_path).strip()
-    if "#" in raw_path:
-        return EndfMaterialPath(raw_path).subpath is None
-    return len(EndfPath(raw_path)) <= 2
+    try:
+        if "#" in raw_path:
+            return EndfMaterialPath(raw_path).subpath is not None
+        return len(EndfPath(raw_path)) > 2
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _path_kind(material_path):
     """Classify a resolved material-qualified path by its depth.
 
-    Returns one of ``"material"`` (selector only), ``"mf"`` (selector and
-    MF), ``"section"`` (selector, MF and MT) or ``"field"`` (a path
-    reaching into a section).
+    Returns ``"material"`` (selector only), ``"mf"`` (selector and MF),
+    ``"section"`` (selector, MF and MT) or ``"field"`` (a path reaching
+    into a section).
     """
     mp = EndfMaterialPath(material_path)
     if mp.mf is None:
@@ -79,7 +99,15 @@ def _path_kind(material_path):
     return "field"
 
 
-def _extract(endf_file, resolved, kind, label):
+def _open(file, parser, role):
+    """Open ``file`` as an :class:`EndfFile`, or exit with a clean error."""
+    try:
+        return open_endf_file(file, parser)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"cannot read {role} file {file}: {exc}")
+
+
+def _extract(endf_file, resolved, kind):
     """Return the object addressed by ``resolved`` in ``endf_file``.
 
     A ``"material"`` or ``"mf"`` path yields a ``{(MF, MT): section}``
@@ -95,8 +123,7 @@ def _extract(endf_file, resolved, kind, label):
             if mf_scope is None or mf == mf_scope
         }
         if kind == "mf" and not sections:
-            print(f"{label} has no MF={mf_scope} section to copy", file=sys.stderr)
-            sys.exit(1)
+            _fail(f"the source has no MF={mf_scope} section to copy")
         return sections
     # a section or a field within a section
     obj = endf_file[resolved]
@@ -121,41 +148,33 @@ def _install(endf_file, resolved, kind, obj):
             del material[mf, mt]
 
 
-def _write_new_tape(parser, outfile, resolved, kind, obj):
-    """Build a single-material tape from ``obj`` and write it to ``outfile``.
-
-    This handles the case of an empty target file: there is no tape to
-    edit, so a fresh single-material ``{MF: {MT: section}}`` dict is
-    assembled from the extracted object and written out.
-    """
-    mp = EndfMaterialPath(resolved)
-    material = {}
-    if kind in ("material", "mf"):
-        for (mf, mt), section in obj.items():
-            material.setdefault(mf, {})[mt] = section
-    elif kind == "section":
-        material[mp.mf] = {mp.mt: obj}
-    else:  # field
-        section = {}
-        mp.subpath.set(section, obj)
-        material[mp.mf] = {mp.mt: section}
-    write_tape_file([material], outfile, parser=parser, overwrite=True)
-
-
-def _replace_element(parser, raw_path, sourcefile, destfiles, create_backup):
-    source = open_endf_file(sourcefile, parser)
-    src_resolved = resolve_material_path(source, raw_path)
-    kind = _path_kind(src_resolved)
-    obj = _extract(source, src_resolved, kind, f"source {sourcefile}")
+def _replace_element(
+    parser, source_path, target_path, sourcefile, destfiles, create_backup
+):
+    source = _open(sourcefile, parser, "source")
+    src_resolved = resolve_material_path(source, source_path)
+    try:
+        source_kind = _path_kind(src_resolved)
+        obj = _extract(source, src_resolved, source_kind)
+    except Exception as exc:  # noqa: BLE001
+        _fail(f"cannot read {src_resolved} from {sourcefile}: {exc}")
     for outfile in destfiles:
-        if os.path.getsize(outfile) == 0:
-            # an empty target carries no tape to edit: build a new one
-            # (there is also no prior content that a backup could save)
-            _write_new_tape(parser, outfile, src_resolved, kind, obj)
-            continue
-        dest = open_endf_file(outfile, parser)
-        dst_resolved = resolve_material_path(dest, raw_path)
-        _install(dest, dst_resolved, kind, obj)
+        dest = _open(outfile, parser, "target")
+        dst_resolved = resolve_material_path(dest, target_path)
+        try:
+            target_kind = _path_kind(dst_resolved)
+        except Exception as exc:  # noqa: BLE001
+            _fail(f"invalid target path {dst_resolved}: {exc}")
+        if target_kind != source_kind:
+            _fail(
+                f"the source path addresses a {source_kind} but the target "
+                f"path addresses a {target_kind}; both must address the "
+                "same kind of object"
+            )
+        try:
+            _install(dest, dst_resolved, target_kind, obj)
+        except Exception as exc:  # noqa: BLE001
+            _fail(f"cannot write {dst_resolved} in {outfile}: {exc}")
         export_endf_file(dest, outfile, create_backup)
     return 0
 
@@ -163,7 +182,10 @@ def _replace_element(parser, raw_path, sourcefile, destfiles, create_backup):
 def perform_action(args):
     assert args["subcommand"] == COMMAND_NAME
     create_backup = not args["no_backup"]
-    raw_path = args["endfpath"]
+    target_path = args["endfpath"]
+    source_path = args["source_path"]
+    if source_path is None:
+        source_path = target_path
     sourcefile = args["sourcefile"]
     izm = args["ignore_zero_mismatch"]
     izm = False if izm is None else izm
@@ -172,10 +194,10 @@ def perform_action(args):
         "ignore_send_records": True,
         "ignore_missing_tpid": True,
     }
-    if not _is_section_level(raw_path):
-        # a subtle replacement inside an MF/MT section and not just
-        # swapping out the entire MF/MT section: keep the verbatim string
-        # representation of the section's other, untouched fields
+    if _is_field_path(target_path) or _is_field_path(source_path):
+        # a replacement inside an MF/MT section and not just swapping out
+        # the entire section: keep the verbatim string representation of
+        # the section's other, untouched fields
         override_args["preserve_value_strings"] = True
     parser = get_endf_parser(args, override_args)
 
@@ -189,6 +211,6 @@ def perform_action(args):
                 sys.exit(1)
         destfiles.extend(glob(fp))
     retcode = _replace_element(
-        parser, raw_path, sourcefile, destfiles, create_backup=create_backup
+        parser, source_path, target_path, sourcefile, destfiles, create_backup
     )
     sys.exit(retcode)

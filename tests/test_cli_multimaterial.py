@@ -494,22 +494,59 @@ def test_replace_whole_mf_missing_in_source(two_material_tape, parser, tmp_path)
     assert "MF=99" in result.stderr
 
 
-def test_replace_into_empty_file_builds_new_tape(parser, tmp_path):
-    """An empty target file is turned into a new ENDF file holding the copy."""
-    work = tmp_path / "new.endf"
-    work.write_text("")
-    result = run_cli(["replace", "-n", "/3/2", str(CU), str(work)])
+def test_replace_source_path_overrides_source_location(
+    two_material_tape, parser, tmp_path
+):
+    """--source-path reads from a single-material reference into a tape slot."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    # write the AWR of the single-material Cu file into tape material #1
+    result = run_cli(
+        ["replace", "-n", "#1/3/2/AWR", "--source-path", "3/2/AWR", str(CU), str(work)]
+    )
     assert result.returncode == 0
-    material = parse_tape_file(work, parser=parser)[0]
-    assert 3 in material and 2 in material[3]
-    assert material[3][2]["AWR"] == 62.389
+    materials = parse_tape_file(work, parser=parser)
+    assert materials[1][3][2]["AWR"] == 62.389  # copied from Cu
+    assert materials[1][1][451]["MAT"] == 3025  # still the Zn material
 
 
-def test_replace_whole_material_into_empty_file(parser, tmp_path):
-    """A whole-material replace into an empty file recreates the material."""
-    work = tmp_path / "new.endf"
+def test_replace_hash_selector_single_material_source_errors(
+    two_material_tape, tmp_path
+):
+    """A #k selector against a single-material source fails cleanly."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    # #1 cannot resolve in the single-material source CU
+    result = run_cli(["replace", "-n", "#1/3/2/AWR", str(CU), str(work)])
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "replace:" in result.stderr
+
+
+def test_replace_empty_target_reported_cleanly(tmp_path):
+    """An empty target file is reported cleanly, not with a traceback."""
+    work = tmp_path / "empty.endf"
     work.write_text("")
-    result = run_cli(["replace", "-n", "/", str(CU), str(work)])
-    assert result.returncode == 0
-    material = parse_tape_file(work, parser=parser)[0]
-    assert material[1][451]["MAT"] == 2925
+    result = run_cli(["replace", "-n", "3/2/AWR", str(CU), str(work)])
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "replace:" in result.stderr
+
+
+def test_replace_path_kind_mismatch_rejected(two_material_tape, tmp_path):
+    """The source and target paths must address the same kind of object."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(
+        [
+            "replace",
+            "-n",
+            "#0/3/2",
+            "--source-path",
+            "#0/3/2/AWR",
+            str(two_material_tape),
+            str(work),
+        ]
+    )
+    assert result.returncode == 1
+    assert "same kind" in result.stderr

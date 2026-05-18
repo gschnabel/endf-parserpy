@@ -80,20 +80,25 @@ ZA and AWR.
 Subcommands that take an :ref:`EndfPath <endf_path_class>` (``show``,
 ``explain``, ``replace``) accept a *material-qualified* path on a
 multi-material tape. Such a path is an ordinary EndfPath prefixed with a
-**material selector** and a ``/``:
+**material selector** and a ``/``. The selector always contains a ``#``,
+and that ``#`` is what marks a path as material-qualified:
 
 * ``#k`` selects the material at tape position ``k`` (zero-based), e.g.
   ``#0/3/2/AWR``;
-* ``MAT`` selects the material with that MAT number, e.g. ``2925/3/2``;
 * ``MAT#k`` selects the ``k``-th material carrying that MAT number, e.g.
   ``9237#1/3/2`` (useful for PENDF tapes that repeat a MAT number once
-  per temperature).
+  per temperature). Use ``#0`` for the first — and, on an ordinary tape,
+  only — material with that MAT number, e.g. ``2925#0/3/2``.
 
-The presence of a ``#`` is what marks a path as material-qualified. On a
-file that holds a single material the selector may be omitted, so the
-plain paths described in the following sections keep working unchanged.
-On a multi-material tape a selector-less path is rejected with a listing
-of the available materials, so you can pick one.
+A bare MAT number *without* a ``#`` is **not** a selector: in a path,
+``2925/3/2`` is an ordinary EndfPath (MF=2925/MT=3/...), because the
+leading segment of a path is otherwise indistinguishable from an MF
+number. Write ``2925#0/3/2`` to select by MAT number.
+
+On a file that holds a single material the selector may be omitted, so
+the plain paths described in the following sections keep working
+unchanged. On a multi-material tape a selector-less path is rejected
+with a listing of the available materials, so you can pick one.
 
 
 Comparing
@@ -191,11 +196,8 @@ one can be done by
    endf-cli replace /1/451 source.endf target.endf
 
 
-Noteworthy, this command also works if ``target.endf``
-is an empty file: a new ENDF file holding the copied content
-is then created. Replacing content
-can also be done on a more fine-grained level. As an advanced
-example, a specific spingroup in MF2/MT151, can be replaced by
+Replacing content can also be done on a more fine-grained level. As an
+advanced example, a specific spingroup in MF2/MT151, can be replaced by
 
 .. code-block:: bash
 
@@ -219,10 +221,22 @@ In both cases the addressed unit of the target is made equal to the
 source's: target sections the source does not have are removed.
 
 When the source or target is a :ref:`multi-material tape
-<cli_multimaterial>`, prefix the EndfPath with a material selector, e.g.
-``endf-cli replace '#0/1/451' source.endf target.endf``. The same path
-(and hence the same selector) is applied to the source and to every
-target file.
+<cli_multimaterial>`, prefix the path with a material selector, e.g.
+``endf-cli replace '#0/1/451' source.endf target.endf``. By default the
+given path is applied to *both* the source and the target, so this form
+expects a material at position 0 in each file. When the location in the
+source differs from the location in the target -- most commonly when
+copying from a single-material reference file into one material of a
+tape -- give the source location explicitly with ``--source-path``:
+
+.. code-block:: bash
+
+   endf-cli replace '#1/3/2/AWR' --source-path 3/2/AWR reference.endf tape.endf
+
+Here ``3/2/AWR`` is read from the single-material ``reference.endf`` and
+written into material ``#1`` of ``tape.endf``. The source and target
+paths must address the same kind of object (both a field, both a
+section, both a whole MF file or both a whole material).
 
 .. note::
 
