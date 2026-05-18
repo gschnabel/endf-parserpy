@@ -32,8 +32,17 @@ def parser():
 
 
 def run_cli(argv, cwd=None, stdin=None):
-    """Run endf-cli as a subprocess against the in-repo source."""
-    env = {**os.environ, "PYTHONPATH": str(REPO), "PYTHONHASHSEED": "0"}
+    """Run endf-cli as a subprocess.
+
+    The ambient environment is inherited, so the subprocess resolves
+    endf_parserpy the same way the pytest process did (the installed
+    package in CI). PYTHONPATH must not be forced onto the source tree:
+    a fresh checkout carries no compiled cpp extension -- those .so
+    files are build artifacts pip installs into the installed package
+    only -- so pinning the subprocess to the source tree would leave
+    the CLI without its default cpp parser and crash it.
+    """
+    env = {**os.environ, "PYTHONHASHSEED": "0"}
     return subprocess.run(
         [sys.executable, "-m", "endf_parserpy.cli.cmd", *argv],
         cwd=cwd,
