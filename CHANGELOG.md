@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.17.0]
+
 ### Added
 
 - Multi-material ENDF tape support via the new functions `parse_tape`, `iter_parse_tape` and `write_tape`, each paired with a `_file` variant (`parse_tape_file`, `iter_parse_tape_file`, `write_tape_file`). These parse and write ENDF files that contain several materials, including PENDF/GENDF tapes that repeat the same material at different temperatures. Mirroring the `parse`/`parsefile` naming of the single-material parser, the bare name works on an in-memory ENDF-6 string and the `_file` variant on a file path. A tape is split lexically into single-material chunks that are handed to the ordinary single-material parser, which is used unchanged. `iter_parse_tape`/`iter_parse_tape_file` stream one material at a time so peak memory stays bounded by the largest single material. The `on_error` option (`"raise"` or `"mark"`) selects whether a material that fails to parse aborts the operation or is returned as a `FailedMaterial` (which round-trips verbatim through `write_tape`). `write_tape_file` consumes its `materials` argument lazily and writes one material at a time, so passing it a generator keeps peak memory bounded by a single material rather than by the whole tape; a material supplied as a plain `list` of ENDF lines (not only a `FailedMaterial`) is written verbatim, with no intermediate parse or render. This removes the long-standing limitation that only a single material per file was supported
