@@ -500,7 +500,7 @@ Regarding the use of the asterisk, be aware that a command, such as
 
 .. code-block:: bash
 
-   endf-cli match --query "/3/*/QM > 0 & /3/*/ZA > 26056
+   endf-cli match --query "/3/*/QM > 0 & /3/*/ZA > 26056" *.endf
 
 will also produce a match for a file if the individual comparisons
 match for different sections, e.g. ``QM > 0`` for ``/3/1`` and
