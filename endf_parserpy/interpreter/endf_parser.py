@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2022/05/30
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2022-2026 International Atomic Energy Agency (IAEA)
 #
@@ -1251,7 +1251,9 @@ class EndfParserPy(EndfParserBase):
             )
         else:
             lines = self.write(endf_dic, exclude, include, zero_as_blank)
-            with open(filename, "w") as fout:
+            # newline="" disables newline translation: the ENDF text is
+            # written with LF on every platform, never CRLF on Windows
+            with open(filename, "w", newline="") as fout:
                 fout.write("\n".join(lines))
 
 

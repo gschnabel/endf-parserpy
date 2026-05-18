@@ -37,6 +37,7 @@ No changes yet.
 - `endf-cli match` printed its `parsing failed: <file>` diagnostic to standard output; it is now written to standard error, where diagnostics belong, leaving standard output for match results only
 - `endf-cli validate` and `endf-cli match` silently exited `0` when a file argument did not exist, or when a glob pattern matched nothing — the unchecked glob expansion dropped the path. Such an argument is now carried through and reported (a failed file for `validate`, a parse failure for `match`), yielding a non-zero exit code
 - `endf-cli compare` aborted with an uncaught `FileNotFoundError` traceback when a file could not be read; it now prints a clean error and exits with status `2`
+- ENDF files written on Windows carried CRLF (`\r\n`) line terminators instead of LF: the Python writers (`EndfParserPy.writefile`, `write_tape`/`write_tape_file`, `EndfFile.export`) opened the output file in text mode, leaving the line terminator to the platform. They now open the file with newline translation disabled and write LF on every platform, matching the C++ parser's writer, which already wrote in binary mode
 
 ## [0.16.1]
 

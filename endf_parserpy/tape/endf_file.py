@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/15
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -1188,7 +1188,8 @@ class EndfFile:
                     )
             else:
                 # every material was deleted: a valid TPID + TEND tape
-                with open(tmp, "w") as fh:
+                # (newline="" keeps the LF terminators verbatim on Windows)
+                with open(tmp, "w", newline="") as fh:
                     fh.write(self._empty_tape_text())
             os.replace(tmp, path)
         except BaseException:

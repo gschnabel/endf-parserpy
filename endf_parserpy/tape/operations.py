@@ -323,6 +323,8 @@ def write_tape_file(
         raise FileExistsError(
             f"file {path} already exists; pass overwrite=True to replace it"
         )
-    with open(path, "w") as fh:
+    # newline="" disables newline translation so the tape is written with
+    # LF terminators on every platform (text mode would emit CRLF on Windows)
+    with open(path, "w", newline="") as fh:
         for chunk in _iter_tape_chunks(materials, parser, exclude, include):
             fh.write(chunk)
