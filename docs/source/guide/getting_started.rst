@@ -57,3 +57,8 @@ dictionary:
 That's all you need to know to get started.
 To learn more about available options and ways to interact with ENDF files,
 feel free to dive into the other tutorials in this documentation.
+
+.. tip::
+
+   A runnable script covering these basics is provided as
+   ``examples/example-001-basic-parsing.py`` in the source repository.

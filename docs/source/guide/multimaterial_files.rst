@@ -473,3 +473,12 @@ files in parallel:
    with ProcessPoolExecutor() as pool:
        worker = partial(material_count, parser=parser)  # parser is pickled
        counts = dict(pool.map(worker, library_files))
+
+.. tip::
+
+   Two runnable scripts in the source repository exercise this
+   interface end to end: ``examples/example-002-multimaterial-tapes.py``
+   builds, explores and edits a multi-material tape, and
+   ``examples/example-003-bounded-memory.py`` demonstrates opening,
+   editing and exporting a tape larger than the available memory with a
+   bounded memory footprint.

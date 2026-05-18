@@ -19,6 +19,12 @@ conveniently on the command line. After the installation of
 ``endf-parserpy``, the command line interface can be
 accessed by invoking ``endf-cli`` with various parameters.
 
+.. tip::
+
+   A complete, narrated end-to-end workflow that touches every
+   ``endf-cli`` subcommand is provided as the runnable bash script
+   ``examples/example-004-cli-workflow.sh`` in the source repository.
+
 Help on the basic use of ``endf-cli`` can be directly
 obtained on the command line by executing
 
