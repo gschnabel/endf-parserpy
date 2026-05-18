@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/13
-# Last modified:   2026/05/13
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -41,7 +41,7 @@ def test_float_in_integer_field_rejected(ParserCls, tmp_path):
     """A tape that packs `0.000000+0` into integer-typed CONT slots must
     be rejected by both backends. Issue #58."""
     fp = tmp_path / "mf32_floats_in_int_fields.endf"
-    fp.write_text(MF32_WITH_FLOATS_IN_INT_FIELDS)
+    fp.write_bytes(MF32_WITH_FLOATS_IN_INT_FIELDS.encode("latin-1"))
     parser = ParserCls(ignore_send_records=True, ignore_missing_tpid=True)
     with pytest.raises(Exception):
         parser.parsefile(str(fp))
@@ -76,5 +76,5 @@ def test_blank_integer_field_treated_as_zero(ParserCls, tmp_path):
     if isinstance(text, list):
         text = "\n".join(text) + "\n"
     fp = tmp_path / "minimal.endf"
-    fp.write_text(text)
+    fp.write_bytes(text.encode("latin-1"))
     parser.parsefile(str(fp))

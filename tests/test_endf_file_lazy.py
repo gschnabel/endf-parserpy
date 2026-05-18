@@ -43,7 +43,7 @@ def multi_lines():
 @pytest.fixture
 def tape_file(multi_lines, tmp_path):
     path = tmp_path / "tape.endf"
-    path.write_text("\n".join(multi_lines) + "\n")
+    path.write_bytes(("\n".join(multi_lines) + "\n").encode("latin-1"))
     return path
 
 
@@ -56,7 +56,7 @@ def _corrupt_tape(multi_lines, tmp_path):
             lines[i] = "X" * 66 + line[66:]  # garble the data fields
             break
     path = tmp_path / "corrupt.endf"
-    path.write_text("\n".join(lines) + "\n")
+    path.write_bytes(("\n".join(lines) + "\n").encode("latin-1"))
     return path
 
 
@@ -188,7 +188,7 @@ def test_mode_parse_all(tape_file, parser):
 
 def test_open_a_valid_empty_tape(tmp_path, parser):
     path = tmp_path / "empty.endf"
-    path.write_text(DEFAULT_TPID_LINE + "\n" + TEND_LINE + "\n")
+    path.write_bytes((DEFAULT_TPID_LINE + "\n" + TEND_LINE + "\n").encode("latin-1"))
     endf_file = EndfFile(path, parser=parser)
     assert len(endf_file) == 0
 
@@ -197,7 +197,7 @@ def test_tape_starting_with_tend_is_rejected(tmp_path, parser):
     # a TEND-only file has no TPID; the indexer must reject it rather
     # than mistake the TEND record for the tape head
     path = tmp_path / "tend_only.endf"
-    path.write_text(TEND_LINE + "\n")
+    path.write_bytes((TEND_LINE + "\n").encode("latin-1"))
     with pytest.raises(TapeStructureError, match="MAT=-1"):
         EndfFile(path, parser=parser)
 
@@ -280,7 +280,7 @@ def test_verify_source_detects_change(tape_file, parser):
     endf_file[0][1, 451]  # fine
     endf_file.unload()
     time.sleep(0.01)
-    tape_file.write_text(tape_file.read_text() + "\n")
+    tape_file.write_bytes(tape_file.read_bytes() + b"\n")
     with pytest.raises(StaleSourceError):
         endf_file[0][1, 451]
 

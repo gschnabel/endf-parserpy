@@ -38,7 +38,9 @@ def _canonical_tape(parser, paths):
 
 def _open(tmp_path, parser, paths, name="tape.endf"):
     path = tmp_path / name
-    path.write_text("\n".join(_canonical_tape(parser, paths)) + "\n")
+    path.write_bytes(
+        ("\n".join(_canonical_tape(parser, paths)) + "\n").encode("latin-1")
+    )
     return EndfFile(path, parser=parser), path
 
 
@@ -50,7 +52,7 @@ def _open(tmp_path, parser, paths, name="tape.endf"):
 def test_unedited_export_is_byte_exact(tmp_path, parser):
     multi = _canonical_tape(parser, [CU, ZN])
     path = tmp_path / "tape.endf"
-    path.write_text("\n".join(multi) + "\n")
+    path.write_bytes(("\n".join(multi) + "\n").encode("latin-1"))
     endf_file = EndfFile(path, parser=parser)
     assert endf_file.to_string().splitlines() == multi
 
@@ -110,7 +112,11 @@ def test_export_peak_memory_is_bounded(tmp_path, parser):
 
     def peak_exporting(n_materials):
         path = tmp_path / f"tape{n_materials}.endf"
-        path.write_text("\n".join(_canonical_tape(parser, [CU] * n_materials)) + "\n")
+        path.write_bytes(
+            ("\n".join(_canonical_tape(parser, [CU] * n_materials)) + "\n").encode(
+                "latin-1"
+            )
+        )
         endf_file = EndfFile(
             path, parser=parser, parsed_cache_bytes=1 << 20, raw_cache_bytes=1 << 20
         )

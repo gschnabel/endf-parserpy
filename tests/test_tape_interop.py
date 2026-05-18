@@ -116,7 +116,7 @@ def test_tape_assembled_one_backend_read_by_the_other():
     fd, path = tempfile.mkstemp(suffix=".endf")
     os.close(fd)
     try:
-        with open(path, "w") as fh:
+        with open(path, "w", newline="") as fh:
             fh.write(tape)
         ef_cpp = EndfFile(path, parser=cpp)
         ef_py = EndfFile(path, parser=py)

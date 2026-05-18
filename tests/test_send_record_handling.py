@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/13
-# Last modified:   2026/05/13
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -60,7 +60,7 @@ def test_well_formed_tape_passes_strict(ParserCls, tmp_path):
     parser = ParserCls(ignore_missing_tpid=True)
     text = _build_minimal_endf_text(parser)
     fp = tmp_path / "complete.endf"
-    fp.write_text(text)
+    fp.write_bytes(text.encode("latin-1"))
     strict = ParserCls(ignore_missing_tpid=True, ignore_send_records=False)
     strict.parsefile(str(fp))
 
@@ -73,7 +73,7 @@ def test_missing_mend_and_tend_rejected_strict(ParserCls, tmp_path):
     text = _build_minimal_endf_text(parser)
     truncated = _strip_trailing_record(text, 2)  # drop MEND + TEND
     fp = tmp_path / "no_mend_tend.endf"
-    fp.write_text(truncated)
+    fp.write_bytes(truncated.encode("latin-1"))
     strict = ParserCls(ignore_missing_tpid=True, ignore_send_records=False)
     with pytest.raises(Exception):
         strict.parsefile(str(fp))
@@ -86,7 +86,7 @@ def test_missing_tend_only_rejected_strict(ParserCls, tmp_path):
     text = _build_minimal_endf_text(parser)
     truncated = _strip_trailing_record(text, 1)  # drop only TEND
     fp = tmp_path / "no_tend.endf"
-    fp.write_text(truncated)
+    fp.write_bytes(truncated.encode("latin-1"))
     strict = ParserCls(ignore_missing_tpid=True, ignore_send_records=False)
     with pytest.raises(Exception):
         strict.parsefile(str(fp))
@@ -101,6 +101,6 @@ def test_truncated_tape_passes_with_ignore_send_records(ParserCls, tmp_path, dro
     text = _build_minimal_endf_text(parser)
     truncated = _strip_trailing_record(text, drop_n)
     fp = tmp_path / f"truncated_{drop_n}.endf"
-    fp.write_text(truncated)
+    fp.write_bytes(truncated.encode("latin-1"))
     lenient = ParserCls(ignore_missing_tpid=True, ignore_send_records=True)
     lenient.parsefile(str(fp))

@@ -43,7 +43,9 @@ def _canonical_tape(parser, paths):
 
 def _open(tmp_path, parser, paths, *, check_edits="eager", name="tape.endf"):
     path = tmp_path / name
-    path.write_text("\n".join(_canonical_tape(parser, paths)) + "\n")
+    path.write_bytes(
+        ("\n".join(_canonical_tape(parser, paths)) + "\n").encode("latin-1")
+    )
     return EndfFile(path, parser=parser, check_edits=check_edits)
 
 
@@ -234,7 +236,7 @@ def test_deferred_nested_write_through(tmp_path, parser):
 def test_deferred_pure_read_keeps_tape_byte_exact(tmp_path, parser):
     multi = _canonical_tape(parser, [CU])
     path = tmp_path / "tape.endf"
-    path.write_text("\n".join(multi) + "\n")
+    path.write_bytes(("\n".join(multi) + "\n").encode("latin-1"))
     endf_file = EndfFile(path, parser=parser, check_edits="deferred")
     # retrieving a live view and only *reading* must not mark anything dirty
     section = endf_file["#0/3/2"]
@@ -320,6 +322,6 @@ def test_field_assignment_into_raw_section_rejected(tmp_path, parser):
 def test_invalid_check_edits_rejected(tmp_path, parser):
     multi = _canonical_tape(parser, [CU])
     path = tmp_path / "tape.endf"
-    path.write_text("\n".join(multi) + "\n")
+    path.write_bytes(("\n".join(multi) + "\n").encode("latin-1"))
     with pytest.raises(ValueError, match="check_edits"):
         EndfFile(path, parser=parser, check_edits="sometimes")

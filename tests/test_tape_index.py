@@ -120,7 +120,7 @@ def test_by_za_lookup(single):
 def test_index_byte_offsets(single, tmp_path):
     multi = _make_multi(single, n=3)
     tape_file = tmp_path / "tape.endf"
-    tape_file.write_text("\n".join(multi) + "\n")
+    tape_file.write_bytes(("\n".join(multi) + "\n").encode("latin-1"))
     raw = tape_file.read_bytes()
 
     index = TapeIndex.from_file(tape_file)
@@ -147,7 +147,7 @@ def test_index_byte_offsets(single, tmp_path):
 def test_from_file_and_from_lines_agree(single, tmp_path):
     multi = _make_multi(single, n=2)
     tape_file = tmp_path / "tape.endf"
-    tape_file.write_text("\n".join(multi) + "\n")
+    tape_file.write_bytes(("\n".join(multi) + "\n").encode("latin-1"))
 
     idx_file = TapeIndex.from_file(tape_file)
     idx_lines = TapeIndex.from_lines(multi)
@@ -159,7 +159,7 @@ def test_from_file_and_from_lines_agree(single, tmp_path):
 
 def test_index_source_stamp(single, tmp_path):
     tape_file = tmp_path / "tape.endf"
-    tape_file.write_text("\n".join(_make_multi(single)) + "\n")
+    tape_file.write_bytes(("\n".join(_make_multi(single)) + "\n").encode("latin-1"))
     index = TapeIndex.from_file(tape_file)
 
     stat = tape_file.stat()

@@ -78,7 +78,7 @@ def tape_with_bad_material(tmp_path_factory, two_material_tape):
         out.append(line)
     assert corrupted, "could not find an MF3 line of MAT 3025 to corrupt"
     path = tmp_path_factory.mktemp("badtape") / "bad.endf"
-    path.write_text("".join(out))
+    path.write_bytes(("".join(out)).encode("latin-1"))
     return path
 
 

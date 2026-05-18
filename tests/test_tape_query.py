@@ -36,7 +36,7 @@ def _write_tape(tmp_path, paths):
         bodies.append(body)
     lines = [tpid] + sum(bodies, []) + [tend]
     out = tmp_path / "tape.endf"
-    out.write_text("\n".join(lines) + "\n")
+    out.write_bytes(("\n".join(lines) + "\n").encode("latin-1"))
     return out
 
 
@@ -130,7 +130,7 @@ def test_get_failed_section_raises(tmp_path, parser):
     tpid, body, tend = _body(CU)
     lines = _corrupt_first_record([tpid] + body + [tend])
     tape = tmp_path / "corrupt.endf"
-    tape.write_text("\n".join(lines) + "\n")
+    tape.write_bytes(("\n".join(lines) + "\n").encode("latin-1"))
     endf_file = EndfFile(tape, parser=parser, on_error="mark")
     with pytest.raises(SectionParseError):
         endf_file.get("#0/1/451/AWR")
@@ -164,7 +164,7 @@ def test_build_index_on_error(tmp_path, parser):
     _, body2, _ = _body(ZN)
     lines = _corrupt_first_record([tpid] + body + body2 + [tend])
     tape = tmp_path / "corrupt.endf"
-    tape.write_text("\n".join(lines) + "\n")
+    tape.write_bytes(("\n".join(lines) + "\n").encode("latin-1"))
 
     marked = EndfFile(tape, parser=parser, on_error="mark")
     mapping = marked.build_index("1/451/AWR")
