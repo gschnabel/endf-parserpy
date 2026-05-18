@@ -22,7 +22,7 @@ from ..cmd_utils import (
 from endf_parserpy import EndfMaterialPath
 
 
-COMMAND_NAME = "insert"
+COMMAND_NAME = "insert-material"
 
 
 def add_subparser(subparsers):
@@ -64,7 +64,7 @@ def add_subparser(subparsers):
 
 def _fail(message):
     """Print a clean one-line error and exit with status 1."""
-    print(f"insert: {message}", file=sys.stderr)
+    print(f"insert-material: {message}", file=sys.stderr)
     sys.exit(1)
 
 

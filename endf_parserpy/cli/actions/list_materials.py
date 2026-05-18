@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2026/05/17
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2026 International Atomic Energy Agency (IAEA)
 #
@@ -18,7 +18,7 @@ from ..cmd_utils import (
 )
 
 
-COMMAND_NAME = "list"
+COMMAND_NAME = "list-materials"
 
 
 def add_subparser(subparsers):

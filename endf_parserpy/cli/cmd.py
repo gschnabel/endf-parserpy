@@ -27,6 +27,7 @@ ACTIONS = (
     "update_directory",
     "insert_text",
     "insert_material",
+    "remove_material",
     "explain",
     "match",
 )

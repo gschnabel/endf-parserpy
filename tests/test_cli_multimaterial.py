@@ -120,14 +120,14 @@ def test_format_material_table(two_material_tape, parser):
 
 
 def test_list_single_material():
-    result = run_cli(["list", str(CU)])
+    result = run_cli(["list-materials", str(CU)])
     assert result.returncode == 0
     assert "1 material" in result.stdout
     assert "MAT=2925" in result.stdout
 
 
 def test_list_multi_material(two_material_tape):
-    result = run_cli(["list", str(two_material_tape)])
+    result = run_cli(["list-materials", str(two_material_tape)])
     assert result.returncode == 0
     assert "2 materials" in result.stdout
     assert "#0" in result.stdout and "#1" in result.stdout
@@ -601,7 +601,9 @@ def test_insert_appends_by_default(two_material_tape, parser, tmp_path):
     """Without --after, the material is appended at the end of the tape."""
     work = tmp_path / "tape.endf"
     shutil.copy(two_material_tape, work)
-    result = run_cli(["insert", "-n", "--source-path", "#0", str(CU), str(work)])
+    result = run_cli(
+        ["insert-material", "-n", "--source-path", "#0", str(CU), str(work)]
+    )
     assert result.returncode == 0
     assert _mats(work, parser) == [2925, 3025, 2925]
 
@@ -611,7 +613,16 @@ def test_insert_after_position(two_material_tape, parser, tmp_path):
     work = tmp_path / "tape.endf"
     shutil.copy(two_material_tape, work)
     result = run_cli(
-        ["insert", "-n", "--after", "#0", "--source-path", "#0", str(CU), str(work)]
+        [
+            "insert-material",
+            "-n",
+            "--after",
+            "#0",
+            "--source-path",
+            "#0",
+            str(CU),
+            str(work),
+        ]
     )
     assert result.returncode == 0
     assert _mats(work, parser) == [2925, 2925, 3025]
@@ -623,7 +634,7 @@ def test_insert_from_multi_material_source(two_material_tape, parser, tmp_path):
     shutil.copy(CU, work)
     result = run_cli(
         [
-            "insert",
+            "insert-material",
             "-n",
             "--after",
             "#0",
@@ -643,7 +654,16 @@ def test_insert_result_validates(two_material_tape, tmp_path):
     shutil.copy(two_material_tape, work)
     assert (
         run_cli(
-            ["insert", "-n", "--after", "#0", "--source-path", "#0", str(CU), str(work)]
+            [
+                "insert-material",
+                "-n",
+                "--after",
+                "#0",
+                "--source-path",
+                "#0",
+                str(CU),
+                str(work),
+            ]
         ).returncode
         == 0
     )
@@ -654,7 +674,9 @@ def test_insert_section_source_path_rejected(two_material_tape, tmp_path):
     """--source-path must select a whole material, not a section."""
     work = tmp_path / "tape.endf"
     shutil.copy(two_material_tape, work)
-    result = run_cli(["insert", "-n", "--source-path", "#0/3/2", str(CU), str(work)])
+    result = run_cli(
+        ["insert-material", "-n", "--source-path", "#0/3/2", str(CU), str(work)]
+    )
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
     assert "whole material" in result.stderr
@@ -665,8 +687,67 @@ def test_insert_after_out_of_range_clean_error(two_material_tape, tmp_path):
     work = tmp_path / "tape.endf"
     shutil.copy(two_material_tape, work)
     result = run_cli(
-        ["insert", "-n", "--after", "#9", "--source-path", "#0", str(CU), str(work)]
+        [
+            "insert-material",
+            "-n",
+            "--after",
+            "#9",
+            "--source-path",
+            "#0",
+            str(CU),
+            str(work),
+        ]
     )
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
-    assert "insert:" in result.stderr
+    assert "insert-material:" in result.stderr
+
+
+# --- Phase 15: the remove-material subcommand ------------------------------
+
+
+def test_remove_material_by_position(two_material_tape, parser, tmp_path):
+    """remove-material #k drops the material at tape position k."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["remove-material", "-n", "#1", str(work)])
+    assert result.returncode == 0
+    assert _mats(work, parser) == [2925]
+    assert "removed material #1 (MAT 3025)" in result.stdout
+
+
+def test_remove_material_by_mat_number(two_material_tape, parser, tmp_path):
+    """remove-material MAT#k drops the material with that MAT number."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["remove-material", "-n", "2925#0", str(work)])
+    assert result.returncode == 0
+    assert _mats(work, parser) == [3025]
+
+
+def test_remove_only_material_empties_tape(parser, tmp_path):
+    """Removing the sole material leaves a valid, empty tape."""
+    work = tmp_path / "cu.endf"
+    shutil.copy(CU, work)
+    result = run_cli(["remove-material", "-n", "#0", str(work)])
+    assert result.returncode == 0
+    assert len(parse_tape_file(work, parser=parser)) == 0
+
+
+def test_remove_material_out_of_range_clean_error(two_material_tape, tmp_path):
+    """An out-of-range selector fails cleanly, not with a traceback."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["remove-material", "-n", "#9", str(work)])
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "remove-material:" in result.stderr
+
+
+def test_remove_material_section_selector_rejected(two_material_tape, tmp_path):
+    """A section-depth path is rejected; remove-material takes a material."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["remove-material", "-n", "#0/3/2", str(work)])
+    assert result.returncode == 1
+    assert "whole material" in result.stderr

@@ -31,13 +31,13 @@ which yields
 .. code-block:: text
 
    usage: endf-cli [-h]
-                   {compare,convert,validate,replace,show,list,update-directory,insert-text,insert,explain,match}
+                   {compare,convert,validate,replace,show,list-materials,update-directory,insert-text,insert-material,remove-material,explain,match}
                    ...
 
    Command-line interface to ENDF files
 
    positional arguments:
-     {compare,convert,validate,replace,show,list,update-directory,insert-text,insert,explain,match}
+     {compare,convert,validate,replace,show,list-materials,update-directory,insert-text,insert-material,remove-material,explain,match}
 
      options:
        -h, --help            show this help message and exit
@@ -72,7 +72,7 @@ tape, run
 
 .. code-block:: bash
 
-   endf-cli list <endf-file>
+   endf-cli list-materials <endf-file>
 
 which prints one line per material, with its tape position, MAT number,
 ZA and AWR.
@@ -254,7 +254,7 @@ subcommand adds a whole *new* material from one file into a
 
 .. code-block:: bash
 
-   endf-cli insert --source-path <selector> <source-file> <target-file>
+   endf-cli insert-material --source-path <selector> <source-file> <target-file>
 
 The ``--source-path`` argument is a :ref:`material selector
 <cli_multimaterial>` (``#k`` or ``MAT#k``) picking the material to take
@@ -266,15 +266,32 @@ new material is inserted right after it:
 .. code-block:: bash
 
    # append the sole material of a single-material file to a tape
-   endf-cli insert --source-path '#0' material.endf tape.endf
+   endf-cli insert-material --source-path '#0' material.endf tape.endf
 
    # insert the 2nd material of one tape right after material #0 of another
-   endf-cli insert --after '#0' --source-path '#1' source_tape.endf tape.endf
+   endf-cli insert-material --after '#0' --source-path '#1' source_tape.endf tape.endf
 
 As with ``replace``, a backup of the target is created with suffix
 ``.bak`` unless the ``-n`` argument is supplied. To add or overwrite an
 individual section or a whole MF file rather than a whole material, use
 ``replace``.
+
+
+Removing a material from a tape
+-------------------------------
+
+The ``remove-material`` subcommand drops a material from a
+:ref:`tape <cli_multimaterial>`:
+
+.. code-block:: bash
+
+   endf-cli remove-material <selector> <endf-file> ...
+
+The ``<selector>`` is a :ref:`material selector <cli_multimaterial>`
+(``#k`` or ``MAT#k``) identifying the material to remove. Several files
+may be given, and the material is removed from each. Removing the only
+material of a file leaves a valid, empty tape. A backup with suffix
+``.bak`` is created unless ``-n`` is supplied.
 
 
 Showing information
