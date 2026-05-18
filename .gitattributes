@@ -1,1 +1,7 @@
 *.cpp linguist-detectable=false
+
+# ENDF test fixtures must stay byte-identical on every platform: the
+# tape-index tests assert exact byte offsets and cross-check the
+# from_file / from_lines indexers, which agree only for LF input.
+# Pin these files so a Windows checkout does not rewrite LF to CRLF.
+tests/testdata/** -text
