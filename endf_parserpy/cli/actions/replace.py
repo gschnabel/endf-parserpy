@@ -99,6 +99,13 @@ def _path_kind(material_path):
     return "field"
 
 
+def _location(mp):
+    """Render the MF[/MT] an :class:`EndfMaterialPath` addresses."""
+    if mp.mt is None:
+        return f"MF={mp.mf}"
+    return f"MF={mp.mf}/MT={mp.mt}"
+
+
 def _open(file, parser, role):
     """Open ``file`` as an :class:`EndfFile`, or exit with a clean error."""
     try:
@@ -170,6 +177,17 @@ def _replace_element(
                 f"the source path addresses a {source_kind} but the target "
                 f"path addresses a {target_kind}; both must address the "
                 "same kind of object"
+            )
+        src_mp = EndfMaterialPath(src_resolved)
+        dst_mp = EndfMaterialPath(dst_resolved)
+        if (src_mp.mf, src_mp.mt) != (dst_mp.mf, dst_mp.mt):
+            # a section keeps its own MF/MT in its records, so copying it
+            # to a different MF/MT would silently land it back at its own
+            _fail(
+                f"the source addresses {_location(src_mp)} but the target "
+                f"addresses {_location(dst_mp)}; a section or MF file must "
+                "be copied to the same MF/MT, since it carries its own "
+                "MF/MT in its records"
             )
         try:
             _install(dest, dst_resolved, target_kind, obj)

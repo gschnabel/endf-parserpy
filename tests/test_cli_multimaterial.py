@@ -552,6 +552,44 @@ def test_replace_path_kind_mismatch_rejected(two_material_tape, tmp_path):
     assert "same kind" in result.stderr
 
 
+def test_replace_section_mfmt_mismatch_rejected(two_material_tape, tmp_path):
+    """A section may only be copied to the MF/MT it came from."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(
+        [
+            "replace",
+            "-n",
+            "#0/3/3",
+            "--source-path",
+            "#0/3/2",
+            str(two_material_tape),
+            str(work),
+        ]
+    )
+    assert result.returncode == 1
+    assert "MF=3/MT=2" in result.stderr and "MF=3/MT=3" in result.stderr
+
+
+def test_replace_mf_mismatch_rejected(two_material_tape, tmp_path):
+    """A whole MF file may only be copied to the same MF number."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(
+        [
+            "replace",
+            "-n",
+            "#0/4",
+            "--source-path",
+            "#0/3",
+            str(two_material_tape),
+            str(work),
+        ]
+    )
+    assert result.returncode == 1
+    assert "MF=3" in result.stderr and "MF=4" in result.stderr
+
+
 # --- Phase 14: the insert subcommand ---------------------------------------
 
 
