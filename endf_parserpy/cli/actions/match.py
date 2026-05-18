@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -40,13 +40,17 @@ def perform_action(args):
     expr = args["query"]
     tree = expr_parser.parse(expr)
     for fp in args["files"]:
-        files.extend(glob(fp))
+        matches = glob(fp)
+        # keep a non-matching pattern or a missing literal path so that it
+        # is reported as a parse failure rather than silently dropped
+        files.extend(matches if matches else [fp])
     retcode = _match_endf_files(parser, files, tree)
     sys.exit(retcode)
 
 
 def _match_endf_files(parser, files, tree):
     any_failed = False
+    any_match = False
     for file in files:
         try:
             endf_file = open_endf_file(file, parser, on_error="raise")
@@ -66,7 +70,11 @@ def _match_endf_files(parser, files, tree):
                 print(f"parsing failed: {label}", file=sys.stderr)
                 continue
             opts = {"filename": label, "print": "match"}
-            eval_tree_print(tree, endf_dict, opts)
+            if eval_tree_print(tree, endf_dict, opts):
+                any_match = True
 
-    retcode = 1 if any_failed else 0
-    return retcode
+    # grep-like exit status: 2 if a file or material could not be parsed,
+    # otherwise 0 when at least one material matched and 1 when none did
+    if any_failed:
+        return 2
+    return 0 if any_match else 1

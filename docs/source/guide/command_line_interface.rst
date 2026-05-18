@@ -442,10 +442,13 @@ stored within them. The syntax is as follows:
 
    endf-cli match --query <MATCH-EXPR> <endf-file1> ...
 
-This command will list all ENDF files among the ones provided
+This command will list all ENDF materials among the files provided
 for which the ``<MATCH-EXPR>`` applies, and also all the variables
 and associated values appearing in the ``<MATCH-EXPR>``.
 Wildcards in file names are supported, e.g. ``*.endf``.
+The exit code follows the ``grep`` convention: ``0`` if at least one
+material matched, ``1`` if none did, and ``2`` if a file or material
+could not be parsed -- so ``match`` can be used as a test in a script.
 The ``<MATCH-EXPR>`` is composed of order relations between
 symbol names (provided as EndfPath) and numbers, e.g.
 ``/3/1/ZA >= 26056`` that are potentially connected by logical

@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -43,7 +43,10 @@ def perform_action(args):
     parser = get_endf_parser(args)
     files = []
     for fp in args["files"]:
-        files.extend(glob(fp))
+        matches = glob(fp)
+        # keep a non-matching pattern or a missing literal path so that it
+        # is reported as a failed file rather than silently dropped
+        files.extend(matches if matches else [fp])
     retcode = _validate_endf_files(parser, files)
     sys.exit(retcode)
 

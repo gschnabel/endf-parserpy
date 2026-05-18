@@ -3,7 +3,7 @@
 # Author(s):       Georg Schnabel
 # Email:           g.schnabel@iaea.org
 # Creation date:   2024/10/06
-# Last modified:   2026/05/17
+# Last modified:   2026/05/18
 # License:         MIT
 # Copyright (c) 2024-2026 International Atomic Energy Agency (IAEA)
 #
@@ -77,9 +77,18 @@ def _pair_materials(endf_file1, endf_file2):
     return pairs, unpaired1, unpaired2
 
 
+def _open(file, parser):
+    """Open ``file`` as an :class:`EndfFile`, or exit cleanly with status 2."""
+    try:
+        return open_endf_file(file, parser, on_error="raise")
+    except Exception as exc:  # noqa: BLE001
+        print(f"compare: cannot read {file}: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
 def _compare_endf_files(parser, files, atol, rtol):
-    endf_file1 = open_endf_file(files[0], parser, on_error="raise")
-    endf_file2 = open_endf_file(files[1], parser, on_error="raise")
+    endf_file1 = _open(files[0], parser)
+    endf_file2 = _open(files[1], parser)
     pairs, unpaired1, unpaired2 = _pair_materials(endf_file1, endf_file2)
     # A plain single-vs-single comparison prints just the field diff, as
     # the pre-multi-material CLI did; a header is only added once more

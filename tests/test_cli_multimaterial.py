@@ -153,6 +153,20 @@ def test_validate_multi_material_failure(tape_with_bad_material):
     assert "MAT 3025" in result.stdout
 
 
+def test_validate_missing_file_fails(tmp_path):
+    """A missing file argument is reported as failed, not silently dropped."""
+    result = run_cli(["validate", str(tmp_path / "nope.endf")])
+    assert result.returncode == 1
+    assert "failed - " in result.stdout
+
+
+def test_validate_missing_file_among_good_ones_fails(tmp_path):
+    """One missing file makes the whole validation fail (exit code 1)."""
+    result = run_cli(["validate", str(CU), str(tmp_path / "nope.endf")])
+    assert result.returncode == 1
+    assert "ok - " in result.stdout and "failed - " in result.stdout
+
+
 # --- Phase 5: the explain subcommand ---------------------------------------
 
 EXPLAIN_AWR = "ratio of the mass of the material to that of the neutron"
@@ -200,11 +214,31 @@ def test_match_multi_material_selective(two_material_tape):
 
 
 def test_match_parse_failure_reported_on_stderr(tape_with_bad_material):
-    """A material that fails to parse is reported on stderr, not stdout."""
+    """A material that fails to parse is reported on stderr, exit code 2."""
     result = run_cli(["match", str(tape_with_bad_material), "--query", "exists(/3/2)"])
-    assert result.returncode == 1
+    assert result.returncode == 2
     assert "parsing failed" in result.stderr
     assert "parsing failed" not in result.stdout
+
+
+def test_match_exit_code_zero_on_hit(two_material_tape):
+    """match exits 0 when at least one material matches."""
+    result = run_cli(["match", str(two_material_tape), "--query", "exists(/3/2)"])
+    assert result.returncode == 0
+
+
+def test_match_exit_code_one_on_no_hit(two_material_tape):
+    """match exits 1 (grep-like) when nothing matches, with no error."""
+    result = run_cli(["match", str(two_material_tape), "--query", "/1/451/ZA == 99999"])
+    assert result.returncode == 1
+    assert result.stdout == ""
+
+
+def test_match_exit_code_two_on_missing_file(tmp_path):
+    """match exits 2 when a file argument cannot be read."""
+    result = run_cli(["match", str(tmp_path / "nope.endf"), "--query", "exists(/3/2)"])
+    assert result.returncode == 2
+    assert "parsing failed" in result.stderr
 
 
 # --- Phase 7: the show subcommand ------------------------------------------
@@ -411,6 +445,14 @@ def test_compare_multi_vs_single_partial(two_material_tape):
     assert result.returncode == 1
     assert "unpaired" in result.stdout
     assert "MAT 3025" in result.stdout
+
+
+def test_compare_missing_file_clean_error(tmp_path):
+    """An unreadable file is reported cleanly (exit code 2, no traceback)."""
+    result = run_cli(["compare", str(CU), str(tmp_path / "nope.endf")])
+    assert result.returncode == 2
+    assert "Traceback" not in result.stderr
+    assert "compare:" in result.stderr
 
 
 # --- Phase 12: the replace subcommand --------------------------------------
