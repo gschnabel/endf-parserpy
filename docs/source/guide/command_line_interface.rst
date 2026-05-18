@@ -31,13 +31,13 @@ which yields
 .. code-block:: text
 
    usage: endf-cli [-h]
-                   {compare,convert,validate,replace,show,list,update-directory,insert-text,explain,match}
+                   {compare,convert,validate,replace,show,list,update-directory,insert-text,insert,explain,match}
                    ...
 
    Command-line interface to ENDF files
 
    positional arguments:
-     {compare,convert,validate,replace,show,list,update-directory,insert-text,explain,match}
+     {compare,convert,validate,replace,show,list,update-directory,insert-text,insert,explain,match}
 
      options:
        -h, --help            show this help message and exit
@@ -243,6 +243,38 @@ section, both a whole MF file or both a whole material).
    Be aware that the directory in MF1/MT451 is not updated during
    an insertion/replacement procedure. :ref:`See below <updating_directory_cli>`
    how to update it to be in sync with the content of the file.
+
+
+Inserting a material into a tape
+--------------------------------
+
+Whereas ``replace`` edits material(s) that already exist, the ``insert``
+subcommand adds a whole *new* material from one file into a
+:ref:`tape <cli_multimaterial>`:
+
+.. code-block:: bash
+
+   endf-cli insert --source-path <selector> <source-file> <target-file>
+
+The ``--source-path`` argument is a :ref:`material selector
+<cli_multimaterial>` (``#k`` or ``MAT#k``) picking the material to take
+from ``<source-file>``; it is mandatory. By default the material is
+appended at the end of the target tape. To place it at a specific
+position, give ``--after`` with a material selector of the target -- the
+new material is inserted right after it:
+
+.. code-block:: bash
+
+   # append the sole material of a single-material file to a tape
+   endf-cli insert --source-path '#0' material.endf tape.endf
+
+   # insert the 2nd material of one tape right after material #0 of another
+   endf-cli insert --after '#0' --source-path '#1' source_tape.endf tape.endf
+
+As with ``replace``, a backup of the target is created with suffix
+``.bak`` unless the ``-n`` argument is supplied. To add or overwrite an
+individual section or a whole MF file rather than a whole material, use
+``replace``.
 
 
 Showing information

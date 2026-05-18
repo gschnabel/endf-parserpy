@@ -550,3 +550,85 @@ def test_replace_path_kind_mismatch_rejected(two_material_tape, tmp_path):
     )
     assert result.returncode == 1
     assert "same kind" in result.stderr
+
+
+# --- Phase 14: the insert subcommand ---------------------------------------
+
+
+def _mats(path, parser):
+    return [m[1][451]["MAT"] for m in parse_tape_file(path, parser=parser)]
+
+
+def test_insert_appends_by_default(two_material_tape, parser, tmp_path):
+    """Without --after, the material is appended at the end of the tape."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["insert", "-n", "--source-path", "#0", str(CU), str(work)])
+    assert result.returncode == 0
+    assert _mats(work, parser) == [2925, 3025, 2925]
+
+
+def test_insert_after_position(two_material_tape, parser, tmp_path):
+    """--after #k places the new material right after material #k."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(
+        ["insert", "-n", "--after", "#0", "--source-path", "#0", str(CU), str(work)]
+    )
+    assert result.returncode == 0
+    assert _mats(work, parser) == [2925, 2925, 3025]
+
+
+def test_insert_from_multi_material_source(two_material_tape, parser, tmp_path):
+    """--source-path selects which material of a multi-material source."""
+    work = tmp_path / "cu.endf"
+    shutil.copy(CU, work)
+    result = run_cli(
+        [
+            "insert",
+            "-n",
+            "--after",
+            "#0",
+            "--source-path",
+            "#1",
+            str(two_material_tape),
+            str(work),
+        ]
+    )
+    assert result.returncode == 0
+    assert _mats(work, parser) == [2925, 3025]
+
+
+def test_insert_result_validates(two_material_tape, tmp_path):
+    """The tape produced by an insertion is structurally valid."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    assert (
+        run_cli(
+            ["insert", "-n", "--after", "#0", "--source-path", "#0", str(CU), str(work)]
+        ).returncode
+        == 0
+    )
+    assert run_cli(["validate", str(work)]).returncode == 0
+
+
+def test_insert_section_source_path_rejected(two_material_tape, tmp_path):
+    """--source-path must select a whole material, not a section."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(["insert", "-n", "--source-path", "#0/3/2", str(CU), str(work)])
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "whole material" in result.stderr
+
+
+def test_insert_after_out_of_range_clean_error(two_material_tape, tmp_path):
+    """An out-of-range --after selector fails cleanly, not with a traceback."""
+    work = tmp_path / "tape.endf"
+    shutil.copy(two_material_tape, work)
+    result = run_cli(
+        ["insert", "-n", "--after", "#9", "--source-path", "#0", str(CU), str(work)]
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "insert:" in result.stderr
